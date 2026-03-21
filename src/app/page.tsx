@@ -483,7 +483,7 @@ clearTimeout(timeoutId);
         {/* HEADER */}
         <header style={{ position: 'relative', zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 24px', borderBottom: '1px solid #00D4FF18', background: 'rgba(0,4,18,0.97)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-            <img src="/logo.png" alt="Vishwakarma AI" style={{width:42,height:42,objectFit:'contain'}} /><svg width="38" height="38" viewBox="0 0 40 40" style={{display:'none'}}>
+            <svg width="42" height="42" viewBox="0 0 42 42"><defs><linearGradient id="vg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor="#00D4FF"/><stop offset="100%" stopColor="#0055FF"/></linearGradient></defs><rect width="42" height="42" rx="8" fill="url(#vg)" opacity="0.15"/><rect width="42" height="42" rx="8" fill="none" stroke="#00D4FF" strokeWidth="1.5"/><text x="21" y="30" textAnchor="middle" fontSize="26" fontWeight="900" fontFamily="Arial" fill="url(#vg)" style={{filter:'drop-shadow(0 0 6px #00D4FF)'}}>V</text></svg><svg width="38" height="38" viewBox="0 0 40 40" style={{display:'none'}}>
               <polygon points="20,2 37,11 37,29 20,38 3,29 3,11" fill="none" stroke="#00D4FF" strokeWidth="1.5" style={{ filter: 'drop-shadow(0 0 5px #00D4FF)' }} />
               <polygon points="20,9 30,14.5 30,25.5 20,31 10,25.5 10,14.5" fill="none" stroke="#0066FF" strokeWidth="1" />
               <circle cx="20" cy="20" r="3.5" fill="#00D4FF" style={{ filter: 'drop-shadow(0 0 4px #00D4FF)' }} />
