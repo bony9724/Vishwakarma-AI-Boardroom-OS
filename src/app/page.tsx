@@ -334,7 +334,7 @@ clearTimeout(timeoutId);
         speakChunked(`${exec.name} speaking.`, 0.9, 0.82, 'male');
         await delay(900);
         speakChunked(exec.content.slice(0, 500), profile.rate, profile.pitch, profile.gender);
-        await delay(2200 + exec.content.length * 12);
+        await delay(2200 + exec.content.length * 8);
       }
       setActiveExec(-1); setCurrentSpeaker('');
       window.speechSynthesis.cancel();
@@ -483,7 +483,7 @@ clearTimeout(timeoutId);
         {/* HEADER */}
         <header style={{ position: 'relative', zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 24px', borderBottom: '1px solid #00D4FF18', background: 'rgba(0,4,18,0.97)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-            <svg width="38" height="38" viewBox="0 0 40 40">
+            <img src="/logo.png" alt="Vishwakarma AI" style={{width:42,height:42,objectFit:'contain'}} /><svg width="38" height="38" viewBox="0 0 40 40" style={{display:'none'}}>
               <polygon points="20,2 37,11 37,29 20,38 3,29 3,11" fill="none" stroke="#00D4FF" strokeWidth="1.5" style={{ filter: 'drop-shadow(0 0 5px #00D4FF)' }} />
               <polygon points="20,9 30,14.5 30,25.5 20,31 10,25.5 10,14.5" fill="none" stroke="#0066FF" strokeWidth="1" />
               <circle cx="20" cy="20" r="3.5" fill="#00D4FF" style={{ filter: 'drop-shadow(0 0 4px #00D4FF)' }} />
