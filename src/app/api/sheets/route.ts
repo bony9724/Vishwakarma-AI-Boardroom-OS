@@ -1,10 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { google } from 'googleapis';
+import { cookies } from 'next/headers';
 import { getAuthClient } from '@/lib/google-auth';
 
 export async function POST(req: NextRequest) {
   try {
     const { companyName, command, email, boardResult } = await req.json();
+
+    // Same cookie-token approach as gmail/route.ts via getAuthClient.
+    // Also check directly whether the user's own refresh token is present —
+    // if it is, the spreadsheet will be created in THEIR Drive and sharing is not needed.
+    const cookieStore = await cookies();
+    const userIsConnected = !!cookieStore.get('g_refresh_token')?.value;
+
     const auth = await getAuthClient();
     const sheets = google.sheets({ version: 'v4', auth });
     const drive  = google.drive({ version: 'v3', auth });
@@ -46,16 +54,22 @@ export async function POST(req: NextRequest) {
       requestBody: { values: rows },
     });
 
-    if (email) {
-      try {
-        await drive.permissions.create({
-          fileId: sheetId,
-          requestBody: { role: 'writer', type: 'user', emailAddress: email },
-          sendNotificationEmail: true,
-          fields: 'id',
-        });
-      } catch (shareErr) {
-        console.error('Sheets share (user) error:', String(shareErr));
+    if (userIsConnected) {
+      // Spreadsheet is already in the user's own Drive — no sharing needed.
+      console.log('Sheets: user connected, spreadsheet created in their Drive');
+    } else {
+      // Spreadsheet was created using the owner's env token — share with the user's email.
+      if (email) {
+        try {
+          await drive.permissions.create({
+            fileId: sheetId,
+            requestBody: { role: 'writer', type: 'user', emailAddress: email },
+            sendNotificationEmail: true,
+            fields: 'id',
+          });
+        } catch (e) {
+          console.error('Sheets share (user) error:', String(e));
+        }
       }
     }
 
