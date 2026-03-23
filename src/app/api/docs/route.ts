@@ -33,6 +33,7 @@ export async function POST(req: NextRequest) {
     });
 
     // Share with the user's email so it appears in their Google Drive
+    console.log('Docs: sharing to email:', email, '| docId:', docId);
     if (email) {
       try {
         await drive.permissions.create({
@@ -41,9 +42,12 @@ export async function POST(req: NextRequest) {
           sendNotificationEmail: true,
           fields: 'id',
         });
+        console.log('Docs: share success for', email);
       } catch (e) {
         console.error('Docs share error:', String(e));
       }
+    } else {
+      console.warn('Docs: no email in request body — skipping share');
     }
 
     const documentUrl = `https://docs.google.com/document/d/${docId}/edit`;
