@@ -4,7 +4,7 @@ import { getAuthClient } from '@/lib/google-auth';
 
 export async function POST(req: NextRequest) {
   try {
-    const { companyName, command, boardResult } = await req.json();
+    const { companyName, command, email, boardResult } = await req.json();
     const auth = await getAuthClient();
     const docs = google.docs({ version: 'v1', auth });
     const drive = google.drive({ version: 'v3', auth });
@@ -31,6 +31,9 @@ export async function POST(req: NextRequest) {
       requestBody: { requests: [{ insertText: { location: { index: 1 }, text: fullText } }] },
     });
     await drive.permissions.create({ fileId: docId, requestBody: { role: 'reader', type: 'anyone' } });
+    if (email) {
+      await drive.permissions.create({ fileId: docId, requestBody: { role: 'writer', type: 'user', emailAddress: email } });
+    }
 
     const documentUrl = `https://docs.google.com/document/d/${docId}/edit`;
     return NextResponse.json({ success: true, documentUrl });

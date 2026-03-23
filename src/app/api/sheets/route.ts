@@ -4,9 +4,10 @@ import { getAuthClient } from '@/lib/google-auth';
 
 export async function POST(req: NextRequest) {
   try {
-    const { companyName, command, boardResult } = await req.json();
+    const { companyName, command, email, boardResult } = await req.json();
     const auth = await getAuthClient();
     const sheets = google.sheets({ version: 'v4', auth });
+    const drive  = google.drive({ version: 'v3', auth });
 
     const today = new Date().toLocaleDateString('en-IN');
 
@@ -44,6 +45,10 @@ export async function POST(req: NextRequest) {
       valueInputOption: 'RAW',
       requestBody: { values: rows },
     });
+
+    if (email) {
+      await drive.permissions.create({ fileId: sheetId, requestBody: { role: 'writer', type: 'user', emailAddress: email } });
+    }
 
     const link = `https://docs.google.com/spreadsheets/d/${sheetId}/edit`;
     return NextResponse.json({ success: true, link });
