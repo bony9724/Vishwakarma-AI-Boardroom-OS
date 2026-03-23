@@ -538,12 +538,12 @@ export default function BoardroomOS() {
       fetch("/api/docs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ companyName: input.companyName, command: input.command, boardResult }),
+        body: JSON.stringify({ companyName: input.companyName, command: input.command, email: input.email, boardResult }),
       }),
       fetch("/api/sheets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ companyName: input.companyName, command: input.command, boardResult }),
+        body: JSON.stringify({ companyName: input.companyName, command: input.command, email: input.email, boardResult }),
       }),
     ]);
 
