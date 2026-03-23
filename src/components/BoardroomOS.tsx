@@ -345,6 +345,7 @@ export default function BoardroomOS() {
 
   // Google OAuth state
   const [googleConnected, setGoogleConnected] = useState(false);
+  const [googleEmail, setGoogleEmail] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -364,6 +365,7 @@ export default function BoardroomOS() {
       const res = await fetch("/api/auth/status");
       const data = await res.json();
       setGoogleConnected(data.connected);
+      setGoogleEmail(data.email || null);
     } catch (error) {
       console.error("Failed to check Google connection:", error);
       setGoogleConnected(false);
@@ -494,30 +496,70 @@ export default function BoardroomOS() {
     calendarEvent: string;
     sheetsStatus: string;
   }> => {
+    // Step 1: Get board discussion from Claude
     const res = await fetch("/api/boardroom", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        topic: input.command,
-        context: `${input.companyName}, a ${input.industry} company targeting ${input.targetCustomer}. Main challenge: ${input.biggestProblem}`,
+        companyName: input.companyName,
+        industry: input.industry,
+        command: input.command,
         userEmail: input.email,
       }),
     });
     if (!res.ok) throw new Error("Boardroom API error");
     const data = await res.json();
-    
-    // Handle new API response structure
-    const boardDiscussion = data.boardDiscussion || data.meeting || "";
-    const agents = data.agents || {};
-    
+
+    // Format exec discussion as meeting text for display
+    const discussionText = (data.discussion || [])
+      .map((m: { title: string; content: string }) => `**${m.title.toUpperCase()}:**\n${m.content}`)
+      .join("\n\n");
+    const meetingText = discussionText
+      + (data.boardDecision ? `\n\n**BOARD DECISION:**\n${data.boardDecision}` : "");
+
+    const boardResult = {
+      boardDecision: data.boardDecision || "",
+      discussion: data.discussion || [],
+      actionItems: data.actionItems || [],
+    };
+
+    // Step 2: Call all Google APIs in parallel, passing email
+    const [gmailRes, calendarRes, docsRes, sheetsRes] = await Promise.allSettled([
+      fetch("/api/gmail", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ companyName: input.companyName, command: input.command, email: input.email, boardResult }),
+      }),
+      fetch("/api/calendar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ companyName: input.companyName, command: input.command, email: input.email, boardResult }),
+      }),
+      fetch("/api/docs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ companyName: input.companyName, command: input.command, boardResult }),
+      }),
+      fetch("/api/sheets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ companyName: input.companyName, command: input.command, boardResult }),
+      }),
+    ]);
+
+    const gmailData  = gmailRes.status    === "fulfilled" ? await gmailRes.value.json()    : null;
+    const calData    = calendarRes.status === "fulfilled" ? await calendarRes.value.json() : null;
+    const docsData   = docsRes.status     === "fulfilled" ? await docsRes.value.json()     : null;
+    const sheetsData = sheetsRes.status   === "fulfilled" ? await sheetsRes.value.json()   : null;
+
     return {
-      meeting: boardDiscussion,
-      email: agents.email?.success ? "sent" : agents.email?.data?.status === "success" ? "sent" : "error",
-      docLink: agents.docs?.data?.url || agents.docs?.data?.docLink || null,
-      leads: agents.leads?.data?.leads || agents.leads?.data?.data?.leads || [],
-      linkedinPost: agents.linkedin?.data?.post || agents.linkedin?.data?.content || null,
-      calendarEvent: agents.calendar?.success ? "booked" : agents.calendar?.data?.status === "success" ? "booked" : "error",
-      sheetsStatus: agents.sheets?.success ? "written" : agents.sheets?.data?.status === "success" ? "written" : "error"
+      meeting:       meetingText,
+      email:         gmailData?.success   ? "sent"    : "error",
+      docLink:       docsData?.documentUrl || null,
+      leads:         data.leads           || [],
+      linkedinPost:  data.linkedinPost    || null,
+      calendarEvent: calData?.success     ? "booked"  : "error",
+      sheetsStatus:  sheetsData?.success  ? "written" : "error",
     };
   };
 
@@ -1009,6 +1051,25 @@ export default function BoardroomOS() {
                   onChange={e => setInput(p => ({ ...p, [key]: e.target.value }))}
                   className="w-full bg-black/40 border border-[#2A2A3A] text-[#E8E6F0] text-sm px-4 py-3 rounded-xl outline-none focus:border-[#8A6B25] transition-colors placeholder-[#6B6A7A]"
                 />
+                {key === "email" && (
+                  <div className="mt-2">
+                    {googleConnected ? (
+                      <span className="inline-flex items-center gap-1.5 text-[10px] font-mono border border-green-500/60 text-green-400 bg-green-500/10 px-2.5 py-1 rounded-full">
+                        <span className="w-1.5 h-1.5 bg-green-400 rounded-full" />
+                        Google Connected{googleEmail ? ` · ${googleEmail}` : ""}
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => window.location.href = "/api/auth/google"}
+                        className="inline-flex items-center gap-1.5 text-[10px] font-mono border border-[#4285F4]/60 text-[#4285F4] bg-[#4285F4]/10 px-2.5 py-1 rounded-full hover:bg-[#4285F4]/20 transition-all"
+                      >
+                        <span className="w-1.5 h-1.5 bg-[#4285F4] rounded-full" />
+                        Connect Google Account
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>
