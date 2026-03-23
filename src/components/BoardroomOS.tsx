@@ -1000,10 +1000,23 @@ export default function BoardroomOS() {
         </div>
         <div className="flex items-center gap-2 md:gap-3">
           {googleConnected ? (
-            <span className="text-[10px] font-mono border border-green-500 text-green-400 bg-green-500/10 px-2 md:px-3 py-1 rounded-full flex items-center gap-1">
-              <span className="w-1.5 h-1.5 bg-green-400 rounded-full"></span>
-              Google Connected ✓
-            </span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-mono border border-green-500 text-green-400 bg-green-500/10 px-2 md:px-3 py-1 rounded-full flex items-center gap-1">
+                <span className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse"></span>
+                Google Connected{googleEmail ? ` · ${googleEmail}` : " ✓"}
+              </span>
+              <button
+                onClick={async () => {
+                  await fetch("/api/auth/disconnect", { method: "POST" });
+                  setGoogleConnected(false);
+                  setGoogleEmail(null);
+                }}
+                className="text-[10px] font-mono border border-red-500/40 text-red-400 bg-red-500/10 px-2 py-1 rounded-full hover:bg-red-500/20 transition-all"
+                title="Disconnect Google"
+              >
+                ✕
+              </button>
+            </div>
           ) : (
             <button
               onClick={() => window.location.href = "/api/auth/google"}
@@ -1052,12 +1065,17 @@ export default function BoardroomOS() {
                   className="w-full bg-black/40 border border-[#2A2A3A] text-[#E8E6F0] text-sm px-4 py-3 rounded-xl outline-none focus:border-[#8A6B25] transition-colors placeholder-[#6B6A7A]"
                 />
                 {key === "email" && (
-                  <div className="mt-2">
+                  <div className="mt-2 flex items-center gap-2 flex-wrap">
                     {googleConnected ? (
-                      <span className="inline-flex items-center gap-1.5 text-[10px] font-mono border border-green-500/60 text-green-400 bg-green-500/10 px-2.5 py-1 rounded-full">
-                        <span className="w-1.5 h-1.5 bg-green-400 rounded-full" />
-                        Google Connected{googleEmail ? ` · ${googleEmail}` : ""}
-                      </span>
+                      <>
+                        <span className="inline-flex items-center gap-1.5 text-[10px] font-mono border border-green-500/60 text-green-400 bg-green-500/10 px-2.5 py-1 rounded-full">
+                          <span className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse" />
+                          Google Connected{googleEmail ? ` · ${googleEmail}` : " ✓"}
+                        </span>
+                        <span className="text-[10px] text-[#6B6A7A] font-mono">
+                          — Docs, Sheets &amp; Calendar go to your account
+                        </span>
+                      </>
                     ) : (
                       <button
                         type="button"
@@ -1065,7 +1083,7 @@ export default function BoardroomOS() {
                         className="inline-flex items-center gap-1.5 text-[10px] font-mono border border-[#4285F4]/60 text-[#4285F4] bg-[#4285F4]/10 px-2.5 py-1 rounded-full hover:bg-[#4285F4]/20 transition-all"
                       >
                         <span className="w-1.5 h-1.5 bg-[#4285F4] rounded-full" />
-                        Connect Google Account
+                        Connect Google Account → saves Docs, Sheets &amp; Calendar to your Drive
                       </button>
                     )}
                   </div>
