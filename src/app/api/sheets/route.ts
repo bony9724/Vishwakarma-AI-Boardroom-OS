@@ -1,20 +1,12 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { google } from 'googleapis';
-
-function auth() {
-  const o = new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-    'https://developers.google.com/oauthplayground'
-  );
-  o.setCredentials({ refresh_token: process.env.GOOGLE_REFRESH_TOKEN });
-  return o;
-}
+import { getAuthClient } from '@/lib/google-auth';
 
 export async function POST(req: NextRequest) {
   try {
     const { companyName, command, boardResult } = await req.json();
-    const sheets = google.sheets({ version: 'v4', auth: auth() });
+    const auth = await getAuthClient();
+    const sheets = google.sheets({ version: 'v4', auth });
 
     const today = new Date().toLocaleDateString('en-IN');
 
@@ -55,7 +47,6 @@ export async function POST(req: NextRequest) {
 
     const link = `https://docs.google.com/spreadsheets/d/${sheetId}/edit`;
     return NextResponse.json({ success: true, link });
-
   } catch (error) {
     console.error('Sheets error:', String(error));
     return NextResponse.json({ error: String(error) }, { status: 500 });

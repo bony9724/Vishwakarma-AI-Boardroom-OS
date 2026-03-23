@@ -4,11 +4,12 @@ import { cookies } from "next/headers";
 export async function GET() {
   try {
     const cookieStore = await cookies();
-    const userTokens = cookieStore.get("user_google_tokens");
-
-    const connected = userTokens ? true : false;
-
-    return NextResponse.json({ connected });
+    const connected = !!(
+      cookieStore.get("g_refresh_token")?.value ||
+      cookieStore.get("g_access_token")?.value
+    );
+    const email = cookieStore.get("g_user_email")?.value || null;
+    return NextResponse.json({ connected, email });
   } catch (error: any) {
     return NextResponse.json({ connected: false, error: error.message });
   }
