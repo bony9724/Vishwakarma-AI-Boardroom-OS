@@ -48,7 +48,12 @@ export async function POST(req: NextRequest) {
 
     if (email) {
       try {
-        await drive.permissions.create({ fileId: sheetId, requestBody: { role: 'writer', type: 'user', emailAddress: email } });
+        await drive.permissions.create({
+          fileId: sheetId,
+          requestBody: { role: 'writer', type: 'user', emailAddress: email },
+          sendNotificationEmail: true,
+          fields: 'id',
+        });
       } catch (shareErr) {
         console.error('Sheets share (user) error:', String(shareErr));
       }
