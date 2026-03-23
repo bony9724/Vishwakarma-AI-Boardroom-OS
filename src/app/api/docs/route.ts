@@ -30,9 +30,18 @@ export async function POST(req: NextRequest) {
       documentId: docId,
       requestBody: { requests: [{ insertText: { location: { index: 1 }, text: fullText } }] },
     });
-    await drive.permissions.create({ fileId: docId, requestBody: { role: 'reader', type: 'anyone' } });
+    try {
+      await drive.permissions.create({ fileId: docId, requestBody: { role: 'reader', type: 'anyone' } });
+    } catch (shareErr) {
+      console.error('Docs share (public) error:', String(shareErr));
+    }
+
     if (email) {
-      await drive.permissions.create({ fileId: docId, requestBody: { role: 'writer', type: 'user', emailAddress: email } });
+      try {
+        await drive.permissions.create({ fileId: docId, requestBody: { role: 'writer', type: 'user', emailAddress: email } });
+      } catch (shareErr) {
+        console.error('Docs share (user) error:', String(shareErr));
+      }
     }
 
     const documentUrl = `https://docs.google.com/document/d/${docId}/edit`;

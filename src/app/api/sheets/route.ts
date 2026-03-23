@@ -47,7 +47,11 @@ export async function POST(req: NextRequest) {
     });
 
     if (email) {
-      await drive.permissions.create({ fileId: sheetId, requestBody: { role: 'writer', type: 'user', emailAddress: email } });
+      try {
+        await drive.permissions.create({ fileId: sheetId, requestBody: { role: 'writer', type: 'user', emailAddress: email } });
+      } catch (shareErr) {
+        console.error('Sheets share (user) error:', String(shareErr));
+      }
     }
 
     const link = `https://docs.google.com/spreadsheets/d/${sheetId}/edit`;
