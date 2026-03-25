@@ -79,6 +79,16 @@ const VOICE_PROFILES: Record<string, { gender: string; rate: number; pitch: numb
   hr:      { gender: 'female', rate: 0.82, pitch: 1.22 },
 };
 
+// BUG 3 FIX — strip any leading number like "1." or "1)" from action items
+const cleanActionItem = (item: string): string => {
+  return item.replace(/^\d+[\.\)]\s*/, '').replace(/\*+/g, '').trim();
+};
+
+// BUG 4 FIX — strip all asterisks and markdown from any text
+const cleanText = (text: string): string => {
+  return text.replace(/\*+/g, '').replace(/#+\s/g, '').replace(/__/g, '').trim();
+};
+
 const speakChunked = (text: string, rate = 0.88, pitch = 1.0, gender = 'male') => {
   if (typeof window === 'undefined') return;
   window.speechSynthesis.cancel();
@@ -108,6 +118,14 @@ const speakChunked = (text: string, rate = 0.88, pitch = 1.0, gender = 'male') =
     window.speechSynthesis.speak(u);
   };
   setTimeout(next, 100);
+};
+
+// BUG 2 FIX — calculate real speech duration from word count
+const getSpeechDuration = (text: string, rate: number = 0.88): number => {
+  const wordCount = text.trim().split(/\s+/).length;
+  const wordsPerMinute = 150 * rate;
+  const durationMs = (wordCount / wordsPerMinute) * 60 * 1000;
+  return durationMs + 2000; // 2 second buffer
 };
 
 type Particle = { x: number; y: number; tx: number; ty: number; life: number; size: number; alpha: number; speed: number; };
@@ -222,7 +240,7 @@ function ExecCard({ exec, msg, active }: { exec: typeof EXECUTIVES[0]; msg?: Exe
       {msg && (
         <div className="px-4 py-3">
           <p className="font-mono leading-relaxed" style={{ color: active ? '#cceeff' : '#88aadd', fontSize: 11, maxHeight: 130, overflow: 'hidden' }}>
-            {msg.content.length > 400 ? msg.content.slice(0, 400) + '…' : msg.content}
+            {cleanText(msg.content.length > 400 ? msg.content.slice(0, 400) + '…' : msg.content)}
           </p>
           {msg.timestamp && <div className="mt-1.5 font-mono" style={{ color: '#334466', fontSize: 9 }}>{msg.timestamp}</div>}
         </div>
@@ -276,9 +294,14 @@ export default function VishwakarmaAI() {
     }
   }, []);
 
+  // BUG 6 FIX — zero delay on voice when awakening starts
   useEffect(() => {
     if (phase !== 'awakening') return;
     let li = 0, ci = 0;
+
+    // BUG 6 FIX: voice starts immediately at 0ms delay instead of 1400ms
+    speakChunked('Namaste. I am Vishwakarma. Your AI Executive Assistant. Seven AI executives will debate your command and execute real world tasks. Speak your command.', 0.82, 0.72, 'male');
+
     const tick = () => {
       if (li >= WAKE_LINES.length) { setTimeout(() => setPhase('command'), 700); return; }
       const line = WAKE_LINES[li];
@@ -287,11 +310,18 @@ export default function VishwakarmaAI() {
         ci++; setTimeout(tick, line === '' ? 0 : 36);
       } else { li++; ci = 0; setTimeout(tick, line === '' ? 70 : 170); }
     };
-    const t = setTimeout(() => {
-      tick();
-      setTimeout(() => speakChunked('Namaste. I am Vishwakarma. Your AI Executive Assistant. Seven AI executives will debate your command and execute real world tasks. Speak your command.', 0.82, 0.72, 'male'), 1400);
-    }, 800);
+    const t = setTimeout(() => { tick(); }, 800);
     return () => clearTimeout(t);
+  }, [phase]);
+
+  // BUG 5 FIX — auto read board decision the moment decision phase starts
+  useEffect(() => {
+    if (phase === 'decision' && boardResult) {
+      setTimeout(() => {
+        readDecisionAloud();
+      }, 600);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase]);
 
   const runActivation = async () => {
@@ -313,14 +343,14 @@ export default function VishwakarmaAI() {
     setPhase('boardroom'); setLoading(true);
     try {
       const controller = new AbortController();
-const timeoutId = setTimeout(() => controller.abort(), 300000);
-const res = await fetch('/api/boardroom', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ companyName, industry, command }),
-  signal: controller.signal,
-});
-clearTimeout(timeoutId);
+      const timeoutId = setTimeout(() => controller.abort(), 300000);
+      const res = await fetch('/api/boardroom', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ companyName, industry, command }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
       const data: BoardResult = await res.json();
       setBoardResult(data);
       if (data.leads && data.leads.length > 0) setLeads(data.leads);
@@ -334,7 +364,10 @@ clearTimeout(timeoutId);
         speakChunked(`${exec.name} speaking.`, 0.9, 0.82, 'male');
         await delay(900);
         speakChunked(exec.content.slice(0, 500), profile.rate, profile.pitch, profile.gender);
-        await delay(2200 + exec.content.length * 8);
+
+        // BUG 2 FIX — use real word count to calculate how long speech takes
+        const speechDuration = getSpeechDuration(exec.content.slice(0, 500), profile.rate);
+        await delay(speechDuration);
       }
       setActiveExec(-1); setCurrentSpeaker('');
       window.speechSynthesis.cancel();
@@ -347,9 +380,12 @@ clearTimeout(timeoutId);
   const readDecisionAloud = () => {
     if (!boardResult) return;
     setReadingDecision(true);
-    const text = `The board has reached a unanimous decision. ${boardResult.boardDecision}. The five action items are: ${boardResult.actionItems.join('. ')}`;
+    const cleanDecision = cleanText(boardResult.boardDecision);
+    const cleanItems = boardResult.actionItems.map(cleanActionItem).join('. ');
+    const text = `The board has reached a unanimous decision. ${cleanDecision}. The action items are: ${cleanItems}`;
     speakChunked(text, 0.80, 0.72, 'male');
-    setTimeout(() => setReadingDecision(false), 14000);
+    const duration = getSpeechDuration(text, 0.80);
+    setTimeout(() => setReadingDecision(false), duration);
   };
 
   const runAgents = async () => {
@@ -483,11 +519,7 @@ clearTimeout(timeoutId);
         {/* HEADER */}
         <header style={{ position: 'relative', zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 24px', borderBottom: '1px solid #00D4FF18', background: 'rgba(0,4,18,0.97)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-            <svg width="42" height="42" viewBox="0 0 42 42"><defs><linearGradient id="vg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor="#00D4FF"/><stop offset="100%" stopColor="#0055FF"/></linearGradient></defs><rect width="42" height="42" rx="8" fill="url(#vg)" opacity="0.15"/><rect width="42" height="42" rx="8" fill="none" stroke="#00D4FF" strokeWidth="1.5"/><text x="21" y="30" textAnchor="middle" fontSize="26" fontWeight="900" fontFamily="Arial" fill="url(#vg)" style={{filter:'drop-shadow(0 0 6px #00D4FF)'}}>V</text></svg><svg width="38" height="38" viewBox="0 0 40 40" style={{display:'none'}}>
-              <polygon points="20,2 37,11 37,29 20,38 3,29 3,11" fill="none" stroke="#00D4FF" strokeWidth="1.5" style={{ filter: 'drop-shadow(0 0 5px #00D4FF)' }} />
-              <polygon points="20,9 30,14.5 30,25.5 20,31 10,25.5 10,14.5" fill="none" stroke="#0066FF" strokeWidth="1" />
-              <circle cx="20" cy="20" r="3.5" fill="#00D4FF" style={{ filter: 'drop-shadow(0 0 4px #00D4FF)' }} />
-            </svg>
+            <svg width="42" height="42" viewBox="0 0 42 42"><defs><linearGradient id="vg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor="#00D4FF"/><stop offset="100%" stopColor="#0055FF"/></linearGradient></defs><rect width="42" height="42" rx="8" fill="url(#vg)" opacity="0.15"/><rect width="42" height="42" rx="8" fill="none" stroke="#00D4FF" strokeWidth="1.5"/><text x="21" y="30" textAnchor="middle" fontSize="26" fontWeight="900" fontFamily="Arial" fill="url(#vg)" style={{filter:'drop-shadow(0 0 6px #00D4FF)'}}>V</text></svg>
             <div>
               <div className="orb" style={{ color: '#00D4FF', fontSize: 15, fontWeight: 900, letterSpacing: 3, animation: 'hglow 3s ease-in-out infinite' }}>VISHWAKARMA AI</div>
               <div style={{ color: '#0055AA', fontSize: 9, letterSpacing: 2, fontFamily: 'monospace' }}>WORLD'S FIRST MULTI-AGENT AI BOARDROOM OS</div>
@@ -588,7 +620,7 @@ clearTimeout(timeoutId);
                   </div>
                   <div style={{ marginBottom: 22 }}>
                     <div style={{ color: '#005588', fontSize: 9, letterSpacing: 2, marginBottom: 7, fontFamily: 'monospace' }}>BOARDROOM COMMAND</div>
-                    <textarea className="inp" rows={4} style={{ resize: 'vertical' }} placeholder="e.g. We want to launch our B2B SaaS to 500 Indian SMEs in 90 days. Build the complete strategy." value={command} onChange={e => setCommand(e.target.value)} />
+                    <textarea className="inp" rows={4} style={{ resize: 'vertical' }} placeholder="e.g. We want to launch our B2B SaaS to 500 Indian companies in 90 days. Build the complete strategy." value={command} onChange={e => setCommand(e.target.value)} />
                   </div>
                   <button className="btn-big" onClick={runActivation} disabled={!companyName || !command}>⚡ INITIATE BOARDROOM SEQUENCE</button>
                 </div>
@@ -639,13 +671,16 @@ clearTimeout(timeoutId);
               {phase === 'decision' && boardResult && (
                 <div className="fu panel" style={{ padding: 28, border: '1px solid #00D4FF', boxShadow: '0 0 40px #00D4FF44' }}>
                   <div className="orb" style={{ color: '#00D4FF', fontSize: 13, fontWeight: 900, letterSpacing: 2, marginBottom: 16 }}>◈ BOARD HAS REACHED UNANIMOUS DECISION</div>
-                  <button className="btn-voice" onClick={readDecisionAloud}>{readingDecision ? '🔊 READING...' : '🔊 READ DECISION ALOUD'}</button>
-                  <div style={{ fontFamily: 'monospace', fontSize: 13, lineHeight: 1.9, color: '#99ccee', marginBottom: 20, whiteSpace: 'pre-wrap' }}>{boardResult.boardDecision}</div>
+                  {/* BUG 5 FIX — auto voice triggers via useEffect, manual button still available */}
+                  <button className="btn-voice" onClick={readDecisionAloud}>{readingDecision ? '🔊 READING...' : '🔊 READ AGAIN'}</button>
+                  {/* BUG 4 FIX — cleanText removes all asterisks */}
+                  <div style={{ fontFamily: 'monospace', fontSize: 13, lineHeight: 1.9, color: '#99ccee', marginBottom: 20, whiteSpace: 'pre-wrap' }}>{cleanText(boardResult.boardDecision)}</div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 24 }}>
+                    {/* BUG 3 FIX — cleanActionItem strips leading numbers like "1." so display shows 1 2 3 not 11 22 33 */}
                     {boardResult.actionItems.map((item, i) => (
                       <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
                         <span className="orb" style={{ background: '#00D4FF22', color: '#00D4FF', border: '1px solid #00D4FF44', borderRadius: 4, width: 26, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, flexShrink: 0 }}>{i + 1}</span>
-                        <span style={{ fontFamily: 'monospace', fontSize: 12, color: '#AADDFF', lineHeight: 1.8 }}>{item}</span>
+                        <span style={{ fontFamily: 'monospace', fontSize: 12, color: '#AADDFF', lineHeight: 1.8 }}>{cleanActionItem(item)}</span>
                       </div>
                     ))}
                   </div>
@@ -691,16 +726,13 @@ clearTimeout(timeoutId);
                 </div>
               </div>
 
-              {/* LEADS TABLE */}
               {leads.length > 0 && (
                 <div className="panel" style={{ padding: 24 }}>
                   <div className="orb" style={{ color: '#00D4FF', fontSize: 11, letterSpacing: 3, marginBottom: 16 }}>🎯 AI GENERATED LEADS — {leads.length} PROSPECTS</div>
                   <div style={{ overflowX: 'auto' }}>
                     <table>
                       <thead>
-                        <tr>
-                          <th>NAME</th><th>COMPANY</th><th>ROLE</th><th>EMAIL</th><th>REASON</th><th>LINKEDIN</th>
-                        </tr>
+                        <tr><th>NAME</th><th>COMPANY</th><th>ROLE</th><th>EMAIL</th><th>REASON</th><th>LINKEDIN</th></tr>
                       </thead>
                       <tbody>
                         {leads.map((lead, i) => (
@@ -719,7 +751,6 @@ clearTimeout(timeoutId);
                 </div>
               )}
 
-              {/* LINKEDIN POST */}
               {linkedinPost && (
                 <div className="panel" style={{ padding: 24 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
@@ -732,7 +763,7 @@ clearTimeout(timeoutId);
                     {linkedinPost}
                   </div>
                   <div style={{ marginTop: 12, fontFamily: 'monospace', fontSize: 10, color: '#334466' }}>
-                    Copy this post and paste it directly on LinkedIn. Your board decision is ready to share with the world.
+                    Copy this post and paste it directly on LinkedIn.
                   </div>
                 </div>
               )}
