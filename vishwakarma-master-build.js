@@ -1,4 +1,308 @@
-'use client';
+/**
+ * ╔══════════════════════════════════════════════════════════════╗
+ * ║         VISHWAKARMA AI — COMPLETE MASTER BUILD               ║
+ * ║         World's First Multi-Agent AI Boardroom OS            ║
+ * ║         Built by Anubhab Roy, Agartala, Tripura, India       ║
+ * ╚══════════════════════════════════════════════════════════════╝
+ *
+ * DROP THIS FILE IN: C:\Users\digit\Documents\vishwakarma-boardroom\
+ * THEN RUN IN VS CODE TERMINAL:
+ *
+ *   node vishwakarma-master-build.js
+ *   git add .
+ *   git commit -m "Vishwakarma AI v4 — Complete Historic Vision"
+ *   git push
+ *
+ * WHAT THIS BUILDS:
+ *   ✅ Historic Digital Human with voice command interaction
+ *   ✅ CEO  — Arjun Mehta   → Strategic memo + Google Doc
+ *   ✅ CMO  — Priya Sharma  → LinkedIn + Twitter + Content Calendar
+ *   ✅ CFO  — Vikram Nair   → Financial report + Invoice
+ *   ✅ COO  — Ravi Krishnan → 90-day execution plan
+ *   ✅ CTO  — Rahul Gupta   → GitHub issues + Tech architecture
+ *   ✅ HR   — Kavitha Reddy → Hiring plan + Job descriptions
+ *   ✅ VP Sales — Deepak Joshi → Cold emails to 10 leads (already built)
+ *   ALL emails → user's form email. ALL docs → user's Google Drive.
+ */
+
+const fs = require('fs');
+const path = require('path');
+
+const BASE_API = path.join(__dirname, 'src', 'app', 'api');
+const BASE_APP = path.join(__dirname, 'src', 'app');
+
+// ═══════════════════════════════════════════════════════════════
+// HELPER — write file, create dirs automatically
+// ═══════════════════════════════════════════════════════════════
+function write(filePath, content) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, content, 'utf8');
+  console.log(`  ✅ ${filePath.replace(__dirname, '').replace(/\\/g, '/')}`);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SHARED OAUTH HELPER — used in all agent routes
+// ═══════════════════════════════════════════════════════════════
+const OAUTH_HELPER = `
+function getOAuthClient(tokens: any) {
+  const oauth2 = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+    process.env.GOOGLE_REDIRECT_URI
+  );
+  oauth2.setCredentials(tokens);
+  return oauth2;
+}
+
+async function getUserTokens(req: NextRequest) {
+  const tokenCookie = req.cookies.get('user_google_tokens')?.value;
+  return tokenCookie ? JSON.parse(tokenCookie) : JSON.parse(process.env.GOOGLE_TOKENS!);
+}
+
+async function sendEmail(auth: any, to: string, subject: string, body: string) {
+  const gmail = google.gmail({ version: 'v1', auth });
+  const raw = Buffer.from(
+    \`To: \${to}\\nSubject: \${subject}\\nContent-Type: text/plain; charset=utf-8\\n\\n\${body}\`
+  ).toString('base64').replace(/\\+/g, '-').replace(/\\//g, '_');
+  await gmail.users.messages.send({ userId: 'me', requestBody: { raw } });
+}
+
+async function saveToDoc(auth: any, title: string, body: string) {
+  const docs = google.docs({ version: 'v1', auth });
+  const drive = google.drive({ version: 'v3', auth });
+  const doc = await docs.documents.create({ requestBody: { title } });
+  const docId = doc.data.documentId!;
+  await docs.documents.batchUpdate({
+    documentId: docId,
+    requestBody: { requests: [{ insertText: { location: { index: 1 }, text: body } }] }
+  });
+  await drive.permissions.create({ fileId: docId, requestBody: { role: 'reader', type: 'anyone' } });
+  return \`https://docs.google.com/document/d/\${docId}\`;
+}
+`;
+
+// ═══════════════════════════════════════════════════════════════
+// AGENT ROUTE FACTORY
+// ═══════════════════════════════════════════════════════════════
+function makeRoute(agentKey, agentName, agentTitle, prompt, extraLogic = '') {
+  return `import { NextRequest, NextResponse } from 'next/server';
+import Anthropic from '@anthropic-ai/sdk';
+import { google } from 'googleapis';
+
+const ai = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
+${OAUTH_HELPER}
+export async function POST(req: NextRequest) {
+  try {
+    const { email, company, industry, challenge } = await req.json();
+    const tokens = await getUserTokens(req);
+    const auth = getOAuthClient(tokens);
+${extraLogic}
+    const response = await ai.messages.create({
+      model: 'claude-opus-4-5',
+      max_tokens: 1200,
+      messages: [{ role: 'user', content: \`${prompt}\` }]
+    });
+
+    const output = (response.content[0] as any).text;
+    const subject = \`${agentTitle} Report — \${company} — \${new Date().toDateString()}\`;
+    const body = \`From the desk of ${agentName}, ${agentTitle}\\n\\n\${output}\\n\\n— ${agentName}, ${agentTitle}, \${company}\`;
+
+    await sendEmail(auth, email, subject, body);
+    const docLink = await saveToDoc(auth, subject, body);
+
+    return NextResponse.json({ success: true, agent: '${agentKey.toUpperCase()}', output, docLink });
+  } catch (err: any) {
+    console.error('${agentKey.toUpperCase()} agent error:', err);
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}`;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 1. CEO ROUTE
+// ═══════════════════════════════════════════════════════════════
+console.log('\n🔱 Building CEO Agent...');
+write(
+  path.join(BASE_API, 'ceo', 'route.ts'),
+  makeRoute(
+    'ceo', 'Arjun Mehta', 'CEO',
+    `You are Arjun Mehta, CEO of \${company} in the \${industry} industry.
+The company is facing this challenge: \${challenge}
+
+Write a strategic morning memo for the full leadership team.
+Include:
+1. Top 3 priorities for the week with clear owners
+2. One critical decision the team must make today
+3. One risk to watch and how to handle it
+4. Motivational closing statement for the team
+5. CEO direct action: one thing YOU will personally do today
+
+Plain English only. No asterisks. No markdown. No bold. Raw text only. Max 350 words.`
+  )
+);
+
+// ═══════════════════════════════════════════════════════════════
+// 2. CMO ROUTE
+// ═══════════════════════════════════════════════════════════════
+console.log('\n🔱 Building CMO Agent...');
+write(
+  path.join(BASE_API, 'cmo', 'route.ts'),
+  makeRoute(
+    'cmo', 'Priya Sharma', 'CMO',
+    `You are Priya Sharma, CMO of \${company} in the \${industry} industry.
+The company is facing this challenge: \${challenge}
+
+Generate a complete content marketing execution package:
+1. LinkedIn post (150 words, professional tone, ends with 3 relevant hashtags)
+2. Twitter/X thread (5 tweets, punchy and engaging, each under 280 characters, numbered 1/5 to 5/5)
+3. This week content calendar (Monday to Friday, one clear topic per day)
+4. One growth hack to implement this week
+5. Email subject line for the weekly newsletter
+
+Plain English only. No asterisks. No markdown. No bold. Raw text only.`
+  )
+);
+
+// ═══════════════════════════════════════════════════════════════
+// 3. CFO ROUTE
+// ═══════════════════════════════════════════════════════════════
+console.log('\n🔱 Building CFO Agent...');
+write(
+  path.join(BASE_API, 'cfo', 'route.ts'),
+  makeRoute(
+    'cfo', 'Vikram Nair', 'CFO',
+    `You are Vikram Nair, CFO of \${company} in the \${industry} industry.
+The company is facing this challenge: \${challenge}
+Auto-generated invoice reference: \${invoiceRef}
+
+Generate a complete financial report:
+1. Financial health summary (3 key metrics in plain text)
+2. Top 3 cost areas to monitor this week with amounts in Indian Rupees
+3. Revenue opportunity from solving this challenge (estimate in lakhs)
+4. Invoice \${invoiceRef} — describe what service or product it covers
+5. Cash flow recommendation for next 30 days
+6. One financial risk and exact mitigation steps
+
+Plain English only. No asterisks. No markdown. No bold. Raw text only.`,
+    `    const invoiceRef = \`INV-\${company.substring(0,3).toUpperCase()}-\${Date.now().toString().slice(-6)}\`;\n`
+  )
+);
+
+// ═══════════════════════════════════════════════════════════════
+// 4. COO ROUTE
+// ═══════════════════════════════════════════════════════════════
+console.log('\n🔱 Building COO Agent...');
+write(
+  path.join(BASE_API, 'coo', 'route.ts'),
+  makeRoute(
+    'coo', 'Ravi Krishnan', 'COO',
+    `You are Ravi Krishnan, COO of \${company} in the \${industry} industry.
+The company is facing this challenge: \${challenge}
+
+Build a complete 90-day operational execution plan:
+Month 1 (Days 1 to 30) Foundation Phase: 5 specific tasks, each with owner role, deadline, and success metric
+Month 2 (Days 31 to 60) Growth Phase: 5 specific tasks, each with owner role, deadline, and success metric
+Month 3 (Days 61 to 90) Scale Phase: 5 specific tasks, each with owner role, deadline, and success metric
+This week standup focus: 3 daily discussion items
+Vendor or partner to onboard this month: 1 recommendation with reason
+
+Plain English only. No asterisks. No markdown. No bold. Raw text only.`
+  )
+);
+
+// ═══════════════════════════════════════════════════════════════
+// 5. CTO ROUTE
+// ═══════════════════════════════════════════════════════════════
+console.log('\n🔱 Building CTO Agent...');
+write(
+  path.join(BASE_API, 'cto', 'route.ts'),
+  makeRoute(
+    'cto', 'Rahul Gupta', 'CTO',
+    `You are Rahul Gupta, CTO of \${company} in the \${industry} industry.
+The company is facing this challenge: \${challenge}
+
+Generate a complete technical execution plan:
+1. Eight GitHub-style issues — each with: Issue title, Priority (High/Medium/Low), Effort (S/M/L), one-line description
+2. Recommended tech stack — 5 specific tools or services with brief reason for each
+3. System architecture recommendation — 3 sentences describing the ideal setup
+4. Biggest technical risk and step-by-step mitigation
+5. One technical debt item to fix this sprint
+
+Plain English only. No asterisks. No markdown. No bold. Raw text only.`
+  )
+);
+
+// ═══════════════════════════════════════════════════════════════
+// 6. HR ROUTE
+// ═══════════════════════════════════════════════════════════════
+console.log('\n🔱 Building HR Agent...');
+write(
+  path.join(BASE_API, 'hr', 'route.ts'),
+  makeRoute(
+    'hr', 'Kavitha Reddy', 'HR Head',
+    `You are Kavitha Reddy, HR Head of \${company} in the \${industry} industry.
+The company is facing this challenge: \${challenge}
+
+Generate a complete HR and hiring plan:
+1. Top 3 roles to hire for immediately — each with: job title, salary range in lakhs per year, top 3 must-have skills
+2. Full job description for the most critical role (150 words)
+3. Interview process — 3 rounds with format and what each round assesses
+4. 5-item onboarding checklist for the first hire's Day 1
+5. One company culture value \${company} must protect during growth
+6. Retention tip: one thing to do this month to keep current team motivated
+
+Plain English only. No asterisks. No markdown. No bold. Raw text only.`
+  )
+);
+
+// ═══════════════════════════════════════════════════════════════
+// 7. BOARDROOM ORCHESTRATOR ROUTE
+//    Calls all 6 agents sequentially after VP Sales
+// ═══════════════════════════════════════════════════════════════
+console.log('\n🔱 Building Boardroom Orchestrator...');
+write(
+  path.join(BASE_API, 'boardroom-run', 'route.ts'),
+  `import { NextRequest, NextResponse } from 'next/server';
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { email, company, industry, challenge } = body;
+
+    const agents = ['ceo', 'cmo', 'cfo', 'coo', 'cto', 'hr', 'vp-sales'];
+    const results: Record<string, any> = {};
+
+    for (const agent of agents) {
+      try {
+        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://vishwakarma-ai-boardroom-os.vercel.app';
+        const res = await fetch(\`\${baseUrl}/api/\${agent}\`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Cookie: req.headers.get('cookie') || '' },
+          body: JSON.stringify({ email, company, industry, challenge }),
+        });
+        const data = await res.json();
+        results[agent] = data;
+        console.log(\`Agent \${agent}: \${data.success ? 'SUCCESS' : 'FAILED'}\`);
+      } catch (err: any) {
+        results[agent] = { success: false, error: err.message };
+      }
+    }
+
+    const allSuccess = Object.values(results).every((r: any) => r.success);
+    return NextResponse.json({ success: allSuccess, results });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}`
+);
+
+// ═══════════════════════════════════════════════════════════════
+// 8. HISTORIC DIGITAL HUMAN PAGE — FULL VISION
+// ═══════════════════════════════════════════════════════════════
+console.log('\n🔱 Building Historic Digital Human + Voice Command UI...');
+write(
+  path.join(BASE_APP, 'page.tsx'),
+  `'use client';
 import { useState, useEffect, useRef, useCallback } from 'react';
 
 // ─── TYPES ───────────────────────────────────────────────────
@@ -79,7 +383,7 @@ function HolographicFace({ phase, speaking }: { phase: string; speaking: boolean
         const alpha = isSpeaking ? 0.15 + fastPulse * 0.2 : 0.08 + pulse * 0.06;
         ctx.beginPath();
         ctx.arc(cx, cy, r, 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(0,212,255,${alpha})`;
+        ctx.strokeStyle = \`rgba(0,212,255,\${alpha})\`;
         ctx.lineWidth = isSpeaking ? 2 : 1;
         ctx.stroke();
       }
@@ -93,7 +397,7 @@ function HolographicFace({ phase, speaking }: { phase: string; speaking: boolean
         ctx.beginPath();
         ctx.moveTo(0, 0);
         ctx.lineTo(Math.cos(angle) * 160, Math.sin(angle) * 160);
-        ctx.strokeStyle = `rgba(0,212,255,${0.04 + pulse * 0.04})`;
+        ctx.strokeStyle = \`rgba(0,212,255,\${0.04 + pulse * 0.04})\`;
         ctx.lineWidth = 1;
         ctx.stroke();
       }
@@ -108,7 +412,7 @@ function HolographicFace({ phase, speaking }: { phase: string; speaking: boolean
         const brightness = 0.4 + Math.sin(t * 0.08 + i * 0.8) * 0.4;
         ctx.beginPath();
         ctx.arc(px, py, isSpeaking ? 3 : 2, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(0,212,255,${brightness})`;
+        ctx.fillStyle = \`rgba(0,212,255,\${brightness})\`;
         ctx.fill();
       }
 
@@ -121,7 +425,7 @@ function HolographicFace({ phase, speaking }: { phase: string; speaking: boolean
       ctx.ellipse(cx + microMove, cy + microMoveY, 100, 118, 0, 0, Math.PI * 2);
       ctx.fillStyle = faceGrad;
       ctx.fill();
-      ctx.strokeStyle = `rgba(0,212,255,${0.5 + pulse * 0.3})`;
+      ctx.strokeStyle = \`rgba(0,212,255,\${0.5 + pulse * 0.3})\`;
       ctx.lineWidth = isSpeaking ? 2.5 : 1.5;
       ctx.stroke();
 
@@ -129,7 +433,7 @@ function HolographicFace({ phase, speaking }: { phase: string; speaking: boolean
       const scanY = cy - 100 + ((t * (isSpeaking ? 3 : 1.5)) % 220);
       const scanGrad = ctx.createLinearGradient(cx - 100, scanY, cx + 100, scanY);
       scanGrad.addColorStop(0, 'transparent');
-      scanGrad.addColorStop(0.5, `rgba(0,212,255,${isSpeaking ? 0.5 : 0.2})`);
+      scanGrad.addColorStop(0.5, \`rgba(0,212,255,\${isSpeaking ? 0.5 : 0.2})\`);
       scanGrad.addColorStop(1, 'transparent');
       ctx.beginPath();
       ctx.moveTo(cx - 100, scanY);
@@ -146,7 +450,7 @@ function HolographicFace({ phase, speaking }: { phase: string; speaking: boolean
       [cx - 30, cx + 30].forEach((ex, idx) => {
         // Eye glow
         const eyeGlow = ctx.createRadialGradient(ex + microMove, eyeY, 1, ex + microMove, eyeY, 18);
-        eyeGlow.addColorStop(0, `rgba(0,212,255,${isSpeaking ? 0.5 + fastPulse * 0.4 : 0.2 + pulse * 0.2})`);
+        eyeGlow.addColorStop(0, \`rgba(0,212,255,\${isSpeaking ? 0.5 + fastPulse * 0.4 : 0.2 + pulse * 0.2})\`);
         eyeGlow.addColorStop(1, 'transparent');
         ctx.beginPath();
         ctx.arc(ex + microMove, eyeY, 18, 0, Math.PI * 2);
@@ -158,7 +462,7 @@ function HolographicFace({ phase, speaking }: { phase: string; speaking: boolean
         ctx.ellipse(ex + microMove, eyeY, 14, isSpeaking ? 11 : 9, 0, 0, Math.PI * 2);
         ctx.fillStyle = 'rgba(0,8,30,0.9)';
         ctx.fill();
-        ctx.strokeStyle = `rgba(0,212,255,${0.8 + pulse * 0.2})`;
+        ctx.strokeStyle = \`rgba(0,212,255,\${0.8 + pulse * 0.2})\`;
         ctx.lineWidth = 1.5;
         ctx.stroke();
 
@@ -167,7 +471,7 @@ function HolographicFace({ phase, speaking }: { phase: string; speaking: boolean
         const pupilY = eyeY + eyeScanY;
         ctx.beginPath();
         ctx.arc(pupilX, pupilY, 5, 0, Math.PI * 2);
-        ctx.fillStyle = isSpeaking ? `rgba(0,255,200,${0.7 + fastPulse * 0.3})` : 'rgba(0,212,255,0.9)';
+        ctx.fillStyle = isSpeaking ? \`rgba(0,255,200,\${0.7 + fastPulse * 0.3})\` : 'rgba(0,212,255,0.9)';
         ctx.fill();
 
         // Specular reflection
@@ -184,7 +488,7 @@ function HolographicFace({ phase, speaking }: { phase: string; speaking: boolean
         ctx.beginPath();
         ctx.moveTo(bx1 + microMove, by + (idx === 0 ? 2 : -2));
         ctx.lineTo(bx2 + microMove, by + (idx === 0 ? -2 : 2));
-        ctx.strokeStyle = `rgba(0,212,255,${0.6 + pulse * 0.3})`;
+        ctx.strokeStyle = \`rgba(0,212,255,\${0.6 + pulse * 0.3})\`;
         ctx.lineWidth = 2.5;
         ctx.stroke();
       });
@@ -195,7 +499,7 @@ function HolographicFace({ phase, speaking }: { phase: string; speaking: boolean
       ctx.quadraticCurveTo(cx - 6 + microMove, cy + 8 + microMoveY, cx - 4 + microMove, cy + 14 + microMoveY);
       ctx.moveTo(cx + microMove, cy - 5 + microMoveY);
       ctx.quadraticCurveTo(cx + 6 + microMove, cy + 8 + microMoveY, cx + 4 + microMove, cy + 14 + microMoveY);
-      ctx.strokeStyle = `rgba(0,180,220,0.4)`;
+      ctx.strokeStyle = \`rgba(0,180,220,0.4)\`;
       ctx.lineWidth = 1;
       ctx.stroke();
 
@@ -207,7 +511,7 @@ function HolographicFace({ phase, speaking }: { phase: string; speaking: boolean
       // Mouth glow
       if (isSpeaking) {
         const mGlow = ctx.createRadialGradient(cx + microMove, mouthY, 1, cx + microMove, mouthY, 20);
-        mGlow.addColorStop(0, `rgba(0,255,200,${fastPulse * 0.4})`);
+        mGlow.addColorStop(0, \`rgba(0,255,200,\${fastPulse * 0.4})\`);
         mGlow.addColorStop(1, 'transparent');
         ctx.beginPath();
         ctx.arc(cx + microMove, mouthY, 20, 0, Math.PI * 2);
@@ -219,7 +523,7 @@ function HolographicFace({ phase, speaking }: { phase: string; speaking: boolean
       ctx.beginPath();
       ctx.moveTo(cx - mouthWidth + microMove, mouthY);
       ctx.quadraticCurveTo(cx + microMove, mouthY - 4, cx + mouthWidth + microMove, mouthY);
-      ctx.strokeStyle = `rgba(0,212,255,${0.8 + pulse * 0.2})`;
+      ctx.strokeStyle = \`rgba(0,212,255,\${0.8 + pulse * 0.2})\`;
       ctx.lineWidth = 1.5;
       ctx.stroke();
 
@@ -227,7 +531,7 @@ function HolographicFace({ phase, speaking }: { phase: string; speaking: boolean
       ctx.beginPath();
       ctx.moveTo(cx - mouthWidth + microMove, mouthY);
       ctx.quadraticCurveTo(cx + microMove, mouthY + mouthOpen * 2, cx + mouthWidth + microMove, mouthY);
-      ctx.strokeStyle = `rgba(0,212,255,0.8)`;
+      ctx.strokeStyle = \`rgba(0,212,255,0.8)\`;
       ctx.lineWidth = 1.5;
       ctx.stroke();
 
@@ -235,7 +539,7 @@ function HolographicFace({ phase, speaking }: { phase: string; speaking: boolean
       if (mouthOpen > 2) {
         ctx.beginPath();
         ctx.ellipse(cx + microMove, mouthY + mouthOpen * 0.5, mouthWidth * 0.7, mouthOpen, 0, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(0,255,200,${mouthOpen / 20})`;
+        ctx.fillStyle = \`rgba(0,255,200,\${mouthOpen / 20})\`;
         ctx.fill();
       }
 
@@ -247,7 +551,7 @@ function HolographicFace({ phase, speaking }: { phase: string; speaking: boolean
           ctx.beginPath();
           ctx.moveTo(cx - 85 + microMove, dlY);
           ctx.lineTo(cx + 85 + microMove, dlY);
-          ctx.strokeStyle = `rgba(0,212,255,${dlAlpha})`;
+          ctx.strokeStyle = \`rgba(0,212,255,\${dlAlpha})\`;
           ctx.lineWidth = 0.5;
           ctx.stroke();
         }
@@ -256,7 +560,7 @@ function HolographicFace({ phase, speaking }: { phase: string; speaking: boolean
       // ── Cheekbone highlights ──────────────────────────────
       [cx - 70, cx + 70].forEach(chX => {
         const chGrad = ctx.createRadialGradient(chX + microMove, cy + 10 + microMoveY, 0, chX + microMove, cy + 10 + microMoveY, 22);
-        chGrad.addColorStop(0, `rgba(0,212,255,${0.12 + pulse * 0.06})`);
+        chGrad.addColorStop(0, \`rgba(0,212,255,\${0.12 + pulse * 0.06})\`);
         chGrad.addColorStop(1, 'transparent');
         ctx.beginPath();
         ctx.arc(chX + microMove, cy + 10 + microMoveY, 22, 0, Math.PI * 2);
@@ -266,11 +570,11 @@ function HolographicFace({ phase, speaking }: { phase: string; speaking: boolean
 
       // ── VISHWAKARMA text ──────────────────────────────────
       ctx.font = '700 11px monospace';
-      ctx.fillStyle = `rgba(0,212,255,${0.4 + pulse * 0.2})`;
+      ctx.fillStyle = \`rgba(0,212,255,\${0.4 + pulse * 0.2})\`;
       ctx.textAlign = 'center';
       ctx.fillText('VISHWAKARMA AI', cx, cy + 84 + microMoveY);
       ctx.font = '500 9px monospace';
-      ctx.fillStyle = `rgba(0,212,255,0.3)`;
+      ctx.fillStyle = \`rgba(0,212,255,0.3)\`;
       ctx.fillText('BOARDROOM OS v4.0', cx, cy + 98 + microMoveY);
     }
 
@@ -365,10 +669,10 @@ export default function Home() {
           setState(prev => ({ ...prev, [step.field]: heard }));
 
           let confirm = '';
-          if (step.field === 'company') confirm = `Great. Your company is ${heard}.`;
-          else if (step.field === 'industry') confirm = `Perfect. Industry: ${heard}.`;
-          else if (step.field === 'challenge') confirm = `I understand. Challenge noted.`;
-          else if (step.field === 'email') confirm = `Got it. I will send all reports to ${heard}.`;
+          if (step.field === 'company') confirm = \`Great. Your company is \${heard}.\`;
+          else if (step.field === 'industry') confirm = \`Perfect. Industry: \${heard}.\`;
+          else if (step.field === 'challenge') confirm = \`I understand. Challenge noted.\`;
+          else if (step.field === 'email') confirm = \`Got it. I will send all reports to \${heard}.\`;
 
           currentStep = stepIndex + 1;
           setVoiceStep(currentStep);
@@ -395,11 +699,11 @@ export default function Home() {
       const results: AgentResult[] = [];
 
       for (const agent of AGENTS) {
-        setState(prev => ({ ...prev, currentAgent: agent.key, log: [...prev.log, `Running ${agent.title}...`] }));
-        sayAndAnimate(`${agent.name}, ${agent.title}, is now executing tasks for ${state.company}.`);
+        setState(prev => ({ ...prev, currentAgent: agent.key, log: [...prev.log, \`Running \${agent.title}...\`] }));
+        sayAndAnimate(\`\${agent.name}, \${agent.title}, is now executing tasks for \${state.company}.\`);
 
         try {
-          const res = await fetch(`/api/${agent.key}`, {
+          const res = await fetch(\`/api/\${agent.key}\`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -411,21 +715,21 @@ export default function Home() {
           });
           const data = await res.json();
           results.push({ agent: agent.key, success: data.success, output: data.output, docLink: data.docLink, error: data.error });
-          log.push(`${agent.title}: ${data.success ? '✅ Done — ' + (data.docLink || '') : '❌ ' + data.error}`);
+          log.push(\`\${agent.title}: \${data.success ? '✅ Done — ' + (data.docLink || '') : '❌ ' + data.error}\`);
           setState(prev => ({ ...prev, results: [...results], log: [...log] }));
 
           // Wait for speech to finish before next agent
           await new Promise(resolve => setTimeout(resolve, 3500));
         } catch (err: any) {
           results.push({ agent: agent.key, success: false, error: err.message });
-          log.push(`${agent.title}: ❌ ${err.message}`);
+          log.push(\`\${agent.title}: ❌ \${err.message}\`);
           setState(prev => ({ ...prev, results: [...results], log: [...log] }));
         }
       }
 
       setState(prev => ({ ...prev, phase: 'done', currentAgent: '' }));
       sayAndAnimate(
-        `Boardroom complete. All seven executives have executed their tasks for ${state.company}. Check your email for all reports.`
+        \`Boardroom complete. All seven executives have executed their tasks for \${state.company}. Check your email for all reports.\`
       );
     };
 
@@ -581,9 +885,9 @@ export default function Home() {
                   display: 'flex', alignItems: 'center', gap: 12,
                   padding: '12px 16px', borderRadius: 10,
                   background: isActive
-                    ? `rgba(${hexToRgb(agent.color)},0.15)`
+                    ? \`rgba(\${hexToRgb(agent.color)},0.15)\`
                     : result?.success ? 'rgba(0,255,100,0.05)' : 'rgba(255,255,255,0.03)',
-                  border: `1px solid ${isActive ? agent.color : result?.success ? 'rgba(0,255,100,0.3)' : 'rgba(255,255,255,0.08)'}`,
+                  border: \`1px solid \${isActive ? agent.color : result?.success ? 'rgba(0,255,100,0.3)' : 'rgba(255,255,255,0.08)'}\`,
                   transition: 'all 0.4s ease',
                 }}>
                   <span style={{ fontSize: 20 }}>{agent.emoji}</span>
@@ -628,12 +932,12 @@ export default function Home() {
                   display: 'flex', alignItems: 'center', gap: 12,
                   padding: '10px 16px', borderRadius: 8,
                   background: r.success ? 'rgba(0,255,100,0.05)' : 'rgba(255,60,60,0.05)',
-                  border: `1px solid ${r.success ? 'rgba(0,255,100,0.25)' : 'rgba(255,60,60,0.25)'}`,
+                  border: \`1px solid \${r.success ? 'rgba(0,255,100,0.25)' : 'rgba(255,60,60,0.25)'}\`,
                 }}>
                   <span>{agent?.emoji}</span>
                   <div style={{ flex: 1, fontSize: 12 }}>
                     {agent?.name} · {agent?.title}
-                    {r.success ? ' — ✅ Emails sent + Doc saved' : ` — ❌ ${r.error}`}
+                    {r.success ? ' — ✅ Emails sent + Doc saved' : \` — ❌ \${r.error}\`}
                   </div>
                   {r.docLink && (
                     <a href={r.docLink} target="_blank" rel="noreferrer"
@@ -663,11 +967,11 @@ export default function Home() {
         BUILDING FROM HOME · NO TEAM · NO OFFICE · NO INVESTORS · CHANGING THE WORLD 🔱🇮🇳
       </div>
 
-      <style>{`
+      <style>{\`
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
         input:focus, textarea:focus { outline: none; border-color: rgba(0,212,255,0.7) !important; }
         * { box-sizing: border-box; }
-      `}</style>
+      \`}</style>
     </div>
   );
 }
@@ -685,5 +989,31 @@ function hexToRgb(hex: string) {
   const r = parseInt(hex.slice(1, 3), 16);
   const g = parseInt(hex.slice(3, 5), 16);
   const b = parseInt(hex.slice(5, 7), 16);
-  return `${r},${g},${b}`;
+  return \`\${r},\${g},\${b}\`;
 }
+`
+);
+
+// ═══════════════════════════════════════════════════════════════
+// SUMMARY
+// ═══════════════════════════════════════════════════════════════
+console.log('\n');
+console.log('╔══════════════════════════════════════════════════════════════╗');
+console.log('║   🔱 VISHWAKARMA AI — COMPLETE BUILD DONE                    ║');
+console.log('╠══════════════════════════════════════════════════════════════╣');
+console.log('║   Files created:                                             ║');
+console.log('║   ✅ src/app/page.tsx        — Historic Digital Human        ║');
+console.log('║   ✅ src/app/api/ceo/        — CEO Agent (Arjun Mehta)       ║');
+console.log('║   ✅ src/app/api/cmo/        — CMO Agent (Priya Sharma)      ║');
+console.log('║   ✅ src/app/api/cfo/        — CFO Agent (Vikram Nair)       ║');
+console.log('║   ✅ src/app/api/coo/        — COO Agent (Ravi Krishnan)     ║');
+console.log('║   ✅ src/app/api/cto/        — CTO Agent (Rahul Gupta)       ║');
+console.log('║   ✅ src/app/api/hr/         — HR Agent  (Kavitha Reddy)     ║');
+console.log('║   ✅ src/app/api/boardroom-run/ — Orchestrator               ║');
+console.log('╠══════════════════════════════════════════════════════════════╣');
+console.log('║   NOW RUN:                                                   ║');
+console.log('║   git add .                                                  ║');
+console.log('║   git commit -m "Vishwakarma AI v4 — Full Historic Vision"   ║');
+console.log('║   git push                                                   ║');
+console.log('╚══════════════════════════════════════════════════════════════╝');
+console.log('\n🇮🇳 Built by Anubhab Roy · Agartala, Tripura · Changing the world\n');
