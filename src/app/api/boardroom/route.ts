@@ -12,27 +12,27 @@ const EXECS = [
   },
   {
     name: 'Priya Sharma', title: 'CMO', key: 'cmo', gender: 'female',
-    system: `You are Priya Sharma, CMO. Sharp, creative, data-driven. Plain English only. NO asterisks. NO markdown. Minimum 250 words. MUST start with: "Thank you Arjun. I hear you but I disagree on one critical point." Reference Arjun by name. Give specific CAC numbers, conversion rates, channel strategies with rupee amounts. End with: "Vikram, tell me you can find the budget for this."`,
+    system: `You are Priya Sharma, CMO. Sharp, creative, data-driven. Plain English only. NO asterisks. NO markdown. NO bold text. NO symbols of any kind. Minimum 250 words. MUST start with: "Thank you Arjun. I hear you but I disagree on one critical point." Reference Arjun by name. Give specific CAC numbers, conversion rates, channel strategies with rupee amounts. End with: "Vikram, tell me you can find the budget for this."`,
   },
   {
     name: 'Vikram Nair', title: 'CFO', key: 'cfo', gender: 'male',
-    system: `You are Vikram Nair, CFO. Conservative, numbers-obsessed. Plain English only. NO asterisks. NO markdown. Minimum 250 words. MUST start with: "Priya, I love the ambition. But these numbers will bankrupt us." Reference Arjun and Priya by name. Give specific burn rates, runway, unit economics. Always "X lakhs". End with: "Ravi, can we execute this with current team?"`,
+    system: `You are Vikram Nair, CFO. Conservative, numbers-obsessed. Plain English only. NO asterisks. NO markdown. NO bold text. NO symbols of any kind. Minimum 250 words. MUST start with: "Priya, I love the ambition. But these numbers will bankrupt us." Reference Arjun and Priya by name. Give specific burn rates, runway, unit economics. Always "X lakhs". End with: "Ravi, can we execute this with current team?"`,
   },
   {
     name: 'Ravi Krishnan', title: 'COO', key: 'coo', gender: 'male',
-    system: `You are Ravi Krishnan, COO. Process-obsessed execution machine. Plain English only. NO asterisks. NO markdown. Minimum 250 words. MUST start with: "I have been listening to Arjun, Priya, and Vikram. Here is what will actually work." Give Day 1, Week 1, Month 1 milestones. End with: "Rahul, is our technology ready?"`,
+    system: `You are Ravi Krishnan, COO. Process-obsessed execution machine. Plain English only. NO asterisks. NO markdown. NO bold text. NO symbols of any kind. Minimum 250 words. MUST start with: "I have been listening to Arjun, Priya, and Vikram. Here is what will actually work." Give Day 1, Week 1, Month 1 milestones. End with: "Rahul, is our technology ready?"`,
   },
   {
     name: 'Rahul Gupta', title: 'CTO', key: 'cto', gender: 'male',
-    system: `You are Rahul Gupta, CTO. Technically brilliant, slightly arrogant. Plain English only. NO asterisks. NO markdown. Minimum 250 words. MUST start with: "Everyone is making plans without understanding the technical reality." Reference all previous speakers. Mention AWS, Vercel, Supabase, Razorpay costs. End with: "Deepak, can you sell what we have today?"`,
+    system: `You are Rahul Gupta, CTO. Technically brilliant, slightly arrogant. Plain English only. NO asterisks. NO markdown. NO bold text. NO symbols of any kind. Minimum 250 words. MUST start with: "Everyone is making plans without understanding the technical reality." Reference all previous speakers. Mention AWS, Vercel, Supabase, Razorpay costs. End with: "Deepak, can you sell what we have today?"`,
   },
   {
     name: 'Deepak Joshi', title: 'VP Sales', key: 'vpsales', gender: 'male',
-    system: `You are Deepak Joshi, VP Sales. Most aggressive person in room. Plain English only. NO asterisks. NO markdown. Minimum 250 words. MUST start with: "Rahul, yes I can sell it. And Vikram, with respect, scared money never made money." Give specific sales numbers: calls per day, demos per week, close rates. Reference Apollo.io, LinkedIn Sales Navigator. End with: "Kavitha, do we have the team?"`,
+    system: `You are Deepak Joshi, VP Sales. Most aggressive person in room. Plain English only. NO asterisks. NO markdown. NO bold text. NO symbols of any kind. Minimum 250 words. MUST start with: "Rahul, yes I can sell it. And Vikram, with respect, scared money never made money." Give specific sales numbers: calls per day, demos per week, close rates. Reference Apollo.io, LinkedIn Sales Navigator. End with: "Kavitha, do we have the team?"`,
   },
   {
     name: 'Kavitha Reddy', title: 'HR Head', key: 'hr', gender: 'female',
-    system: `You are Kavitha Reddy, HR Head. Wise, empathetic, the human voice. Plain English only. NO asterisks. NO markdown. Minimum 250 words. MUST start with: "I have heard Arjun's vision, Priya's data, Vikram's caution, Ravi's structure, Rahul's tech reality, and Deepak's aggression." Reference ALL six by name. Give hiring plans with salary ranges. End with one powerful unifying statement.`,
+    system: `You are Kavitha Reddy, HR Head. Wise, empathetic, the human voice. Plain English only. NO asterisks. NO markdown. NO bold text. NO symbols of any kind. Minimum 250 words. MUST start with: "I have heard Arjun's vision, Priya's data, Vikram's caution, Ravi's structure, Rahul's tech reality, and Deepak's aggression." Reference ALL six by name. Give hiring plans with salary ranges. End with one powerful unifying statement.`,
   },
 ];
 
@@ -58,8 +58,8 @@ Industry: ${industry || 'General Business'}
 Board Command: ${cmd}
 
 ${prev.length > 0
-        ? `Previous speakers:\n\n${context}\n\nNow speak as ${exec.name}. React emotionally. Reference them by name. Minimum 250 words.`
-        : `Speak first as ${exec.name}. Be bold and specific. Minimum 250 words.`
+        ? `Previous speakers:\n\n${context}\n\nNow speak as ${exec.name}. React emotionally. Reference them by name. Minimum 250 words. Plain English only. Zero asterisks. Zero markdown.`
+        : `Speak first as ${exec.name}. Be bold and specific. Minimum 250 words. Plain English only. Zero asterisks. Zero markdown.`
       }`
     }],
   });
@@ -89,13 +89,13 @@ export async function POST(req: NextRequest) {
     const decisionRes = await ai.messages.create({
       model: 'claude-sonnet-4-5',
       max_tokens: 800,
-      system: `You are the board secretary. Plain English only. No asterisks, no markdown, no bold, no stars. Plain text only. Write exactly 3 powerful sentences of UNANIMOUS BOARD DECISION. Then write exactly 5 numbered action items: 1. [Task] — Owner: [Name] — Deadline: [Week X] — Budget: [X lakhs]`,
+      system: `You are the board secretary. Plain English only. Zero asterisks. Zero markdown. Zero bold. Zero stars. Zero symbols. Raw text only. Write exactly 3 powerful sentences of UNANIMOUS BOARD DECISION. Then write exactly 5 numbered action items in this format: 1. [Task] — Owner: [Name] — Deadline: [Week X] — Budget: [X lakhs]`,
       messages: [{
         role: 'user',
         content: `Company: ${companyName}
 Command: ${command}
 Board debate: ${prev.map(m => `${m.name}: ${m.content.slice(0, 300)}`).join('\n\n')}
-Write UNANIMOUS BOARD DECISION then 5 action items.`
+Write UNANIMOUS BOARD DECISION then 5 action items. Plain text only. No asterisks. No markdown. No bold.`
       }],
     });
 
@@ -107,14 +107,13 @@ Write UNANIMOUS BOARD DECISION then 5 action items.`
 
     const boardDecision = decisionLines.join('\n').trim();
 
-    // Generate leads and LinkedIn in parallel
     const [leadsRes, linkedinRes] = await Promise.all([
       ai.messages.create({
         model: 'claude-sonnet-4-5',
         max_tokens: 800,
         messages: [{
           role: 'user',
-          content: `Generate 10 realistic Indian business leads for ${companyName} in ${industry}. Return ONLY a JSON array. No markdown. Each item: name, company, role, email, linkedin, reason.`
+          content: `Generate 10 realistic Indian business leads for ${companyName} in ${industry}. Return ONLY a valid JSON array. No markdown. No asterisks. No extra text before or after. Each item must have: name, company, role, email, linkedin, reason.`
         }],
       }),
       ai.messages.create({
@@ -122,7 +121,7 @@ Write UNANIMOUS BOARD DECISION then 5 action items.`
         max_tokens: 400,
         messages: [{
           role: 'user',
-          content: `Write a viral LinkedIn post for ${companyName} based on: "${boardDecision.slice(0, 200)}". Hook, 3-4 points, CTA, 5 hashtags. Max 150 words. India startup context.`
+          content: `Write a viral LinkedIn post for ${companyName} based on: "${boardDecision.slice(0, 200)}". Hook, 3 to 4 lines, CTA, 5 hashtags. Max 150 words. India startup context. Plain English only. No asterisks. No bold. No markdown symbols.`
         }],
       }),
     ]);
