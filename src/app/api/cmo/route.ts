@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import Anthropic from '@anthropic-ai/sdk';
 import { google } from 'googleapis';
-
-const ai = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
 function getOAuthClient(tokens: any) {
   const oauth2 = new google.auth.OAuth2(
@@ -46,10 +43,8 @@ export async function POST(req: NextRequest) {
     const tokens = await getUserTokens(req);
     const auth = getOAuthClient(tokens);
 
-    const response = await ai.messages.create({
-      model: 'claude-opus-4-5',
-      max_tokens: 1200,
-      messages: [{ role: 'user', content: `You are Priya Sharma, CMO of ${company} in the ${industry} industry.
+    const system = 'You are Priya Sharma, CMO. Plain English only. No asterisks. No markdown. No bold. Raw text only.';
+    const userMessage = `You are Priya Sharma, CMO of ${company} in the ${industry} industry.
 The company is facing this challenge: ${challenge}
 
 Generate a complete content marketing execution package:
@@ -59,10 +54,26 @@ Generate a complete content marketing execution package:
 4. One growth hack to implement this week
 5. Email subject line for the weekly newsletter
 
-Plain English only. No asterisks. No markdown. No bold. Raw text only.` }]
-    });
+Plain English only. No asterisks. No markdown. No bold. Raw text only.`;
 
-    const output = (response.content[0] as any).text;
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'anthropic/claude-sonnet',
+        max_tokens: 1200,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: userMessage }
+        ],
+      }),
+    });
+    const data = await response.json();
+    const output = data.choices[0].message.content;
+
     const subject = `CMO Report — ${company} — ${new Date().toDateString()}`;
     const body = `From the desk of Priya Sharma, CMO\n\n${output}\n\n— Priya Sharma, CMO, ${company}`;
 

@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import Anthropic from '@anthropic-ai/sdk';
 import { google } from 'googleapis';
-
-const ai = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
 function getOAuthClient(tokens: any) {
   const oauth2 = new google.auth.OAuth2(
@@ -47,10 +44,8 @@ export async function POST(req: NextRequest) {
     const auth = getOAuthClient(tokens);
     const invoiceRef = `INV-${company.substring(0,3).toUpperCase()}-${Date.now().toString().slice(-6)}`;
 
-    const response = await ai.messages.create({
-      model: 'claude-opus-4-5',
-      max_tokens: 1200,
-      messages: [{ role: 'user', content: `You are Vikram Nair, CFO of ${company} in the ${industry} industry.
+    const system = 'You are Vikram Nair, CFO. Plain English only. No asterisks. No markdown. No bold. Raw text only.';
+    const userMessage = `You are Vikram Nair, CFO of ${company} in the ${industry} industry.
 The company is facing this challenge: ${challenge}
 Auto-generated invoice reference: ${invoiceRef}
 
@@ -62,10 +57,26 @@ Generate a complete financial report:
 5. Cash flow recommendation for next 30 days
 6. One financial risk and exact mitigation steps
 
-Plain English only. No asterisks. No markdown. No bold. Raw text only.` }]
-    });
+Plain English only. No asterisks. No markdown. No bold. Raw text only.`;
 
-    const output = (response.content[0] as any).text;
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'anthropic/claude-sonnet',
+        max_tokens: 1200,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: userMessage }
+        ],
+      }),
+    });
+    const data = await response.json();
+    const output = data.choices[0].message.content;
+
     const subject = `CFO Report — ${company} — ${new Date().toDateString()}`;
     const body = `From the desk of Vikram Nair, CFO\n\n${output}\n\n— Vikram Nair, CFO, ${company}`;
 

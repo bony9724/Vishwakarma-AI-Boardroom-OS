@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import Anthropic from '@anthropic-ai/sdk';
 import { google } from 'googleapis';
-
-const ai = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
 function getOAuthClient(tokens: any) {
   const oauth2 = new google.auth.OAuth2(
@@ -46,10 +43,8 @@ export async function POST(req: NextRequest) {
     const tokens = await getUserTokens(req);
     const auth = getOAuthClient(tokens);
 
-    const response = await ai.messages.create({
-      model: 'claude-opus-4-5',
-      max_tokens: 1200,
-      messages: [{ role: 'user', content: `You are Kavitha Reddy, HR Head of ${company} in the ${industry} industry.
+    const system = 'You are Kavitha Reddy, HR Head. Plain English only. No asterisks. No markdown. No bold. Raw text only.';
+    const userMessage = `You are Kavitha Reddy, HR Head of ${company} in the ${industry} industry.
 The company is facing this challenge: ${challenge}
 
 Generate a complete HR and hiring plan:
@@ -60,10 +55,26 @@ Generate a complete HR and hiring plan:
 5. One company culture value ${company} must protect during growth
 6. Retention tip: one thing to do this month to keep current team motivated
 
-Plain English only. No asterisks. No markdown. No bold. Raw text only.` }]
-    });
+Plain English only. No asterisks. No markdown. No bold. Raw text only.`;
 
-    const output = (response.content[0] as any).text;
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'anthropic/claude-sonnet',
+        max_tokens: 1200,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: userMessage }
+        ],
+      }),
+    });
+    const data = await response.json();
+    const output = data.choices[0].message.content;
+
     const subject = `HR Head Report — ${company} — ${new Date().toDateString()}`;
     const body = `From the desk of Kavitha Reddy, HR Head\n\n${output}\n\n— Kavitha Reddy, HR Head, ${company}`;
 

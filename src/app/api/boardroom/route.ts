@@ -81,7 +81,7 @@ ${prev.length > 0
 
 export async function POST(req: NextRequest) {
   try {
-    const { companyName, industry, command } = await req.json();
+    const { companyName, industry, command, userEmail } = await req.json();
 
     const discussion: {
       role: string; name: string; title: string;
@@ -133,13 +133,25 @@ Write UNANIMOUS BOARD DECISION then 5 action items. Plain text only. No asterisk
       if (match) leads = JSON.parse(match[0]);
     } catch { leads = []; }
 
-    return NextResponse.json({
-      discussion,
-      boardDecision,
-      actionItems: actionItems.slice(0, 5),
-      leads,
-      linkedinPost,
-    });
+    const boardResult = { discussion, boardDecision, actionItems: actionItems.slice(0, 5), leads, linkedinPost };
+
+    if (userEmail) {
+      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://vishwakarma-ai-boardroom-os.vercel.app';
+      await Promise.allSettled([
+        fetch(`${baseUrl}/api/gmail`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ companyName, command, email: userEmail, boardResult }),
+        }),
+        fetch(`${baseUrl}/api/calendar`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ companyName, command, email: userEmail, boardResult }),
+        }),
+      ]);
+    }
+
+    return NextResponse.json(boardResult);
 
   } catch (error) {
     console.error('Boardroom error:', error);

@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import Anthropic from '@anthropic-ai/sdk';
 import { google } from 'googleapis';
-
-const ai = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
 function getOAuthClient(tokens: any) {
   const oauth2 = new google.auth.OAuth2(
@@ -46,10 +43,8 @@ export async function POST(req: NextRequest) {
     const tokens = await getUserTokens(req);
     const auth = getOAuthClient(tokens);
 
-    const response = await ai.messages.create({
-      model: 'claude-opus-4-5',
-      max_tokens: 1200,
-      messages: [{ role: 'user', content: `You are Arjun Mehta, CEO of ${company} in the ${industry} industry.
+    const system = 'You are Arjun Mehta, CEO. Plain English only. No asterisks. No markdown. No bold. Raw text only.';
+    const userMessage = `You are Arjun Mehta, CEO of ${company} in the ${industry} industry.
 The company is facing this challenge: ${challenge}
 
 Write a strategic morning memo for the full leadership team.
@@ -60,10 +55,26 @@ Include:
 4. Motivational closing statement for the team
 5. CEO direct action: one thing YOU will personally do today
 
-Plain English only. No asterisks. No markdown. No bold. Raw text only. Max 350 words.` }]
-    });
+Plain English only. No asterisks. No markdown. No bold. Raw text only. Max 350 words.`;
 
-    const output = (response.content[0] as any).text;
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'anthropic/claude-sonnet',
+        max_tokens: 1200,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: userMessage }
+        ],
+      }),
+    });
+    const data = await response.json();
+    const output = data.choices[0].message.content;
+
     const subject = `CEO Report — ${company} — ${new Date().toDateString()}`;
     const body = `From the desk of Arjun Mehta, CEO\n\n${output}\n\n— Arjun Mehta, CEO, ${company}`;
 

@@ -423,6 +423,22 @@ export default function Home() {
         }
       }
 
+      // Fire boardroom debate + gmail + calendar with userEmail
+      try {
+        await fetch('/api/boardroom', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            companyName: state.company,
+            industry: state.industry,
+            command: state.challenge,
+            userEmail: state.email,
+          }),
+        });
+      } catch (err) {
+        console.error('Boardroom debate error:', err);
+      }
+
       setState(prev => ({ ...prev, phase: 'done', currentAgent: '' }));
       sayAndAnimate(
         `Boardroom complete. All seven executives have executed their tasks for ${state.company}. Check your email for all reports.`
