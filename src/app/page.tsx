@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 
+const delay = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+
 type Phase = 'landing' | 'awakening' | 'command' | 'activating' | 'boardroom' | 'decision' | 'executing' | 'complete';
 
 interface ExecMessage {
@@ -480,9 +482,8 @@ export default function VishwakarmaAI() {
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
         *{box-sizing:border-box;margin:0;padding:0;}
-        body,html{background:#000008;color:#00D4FF;font-family:'Share Tech Mono',monospace;min-height:100vh;}
+        body,html{background:#000008;color:#00D4FF;font-family:var(--font-share-tech-mono),'Share Tech Mono',monospace;min-height:100vh;}
         ::-webkit-scrollbar{width:3px;}::-webkit-scrollbar-track{background:#000018;}::-webkit-scrollbar-thumb{background:#00D4FF33;border-radius:2px;}
         @keyframes sweep{0%{transform:translateX(-100%);}100%{transform:translateX(200%);}}
         @keyframes hglow{0%,100%{text-shadow:0 0 18px #00D4FF,0 0 36px #00D4FF88;}50%{text-shadow:0 0 28px #00FFFF,0 0 55px #00FFFF99;}}
@@ -490,7 +491,7 @@ export default function VishwakarmaAI() {
         @keyframes fadeUp{from{opacity:0;transform:translateY(18px);}to{opacity:1;transform:translateY(0);}}
         @keyframes float{0%,100%{transform:translateY(0);}50%{transform:translateY(-10px);}}
         .fu{animation:fadeUp 0.55s ease forwards;}
-        .orb{font-family:'Orbitron',sans-serif;}
+        .orb{font-family:var(--font-orbitron),'Orbitron',sans-serif;}
         .panel{background:rgba(0,18,55,0.88);border:1px solid #00D4FF22;border-radius:8px;box-shadow:0 0 14px #00D4FF18;}
         .sdot{animation:dpulse 1.9s ease-in-out infinite;}
         .inp{background:rgba(0,18,55,0.7);border:1px solid #00D4FF33;color:#00D4FF;font-family:'Share Tech Mono',monospace;border-radius:4px;padding:10px 14px;width:100%;outline:none;transition:border-color .2s,box-shadow .2s;font-size:13px;}
@@ -781,4 +782,3 @@ export default function VishwakarmaAI() {
   );
 }
 
-const delay = (ms: number) => new Promise(r => setTimeout(r, ms));
