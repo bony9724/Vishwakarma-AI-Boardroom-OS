@@ -1,705 +1,784 @@
 'use client';
+
 import { useState, useEffect, useRef, useCallback } from 'react';
 
-// ─── TYPES ───────────────────────────────────────────────────
-interface AgentResult {
-  agent: string;
-  success: boolean;
-  output?: string;
-  docLink?: string;
-  error?: string;
+type Phase = 'landing' | 'awakening' | 'command' | 'activating' | 'boardroom' | 'decision' | 'executing' | 'complete';
+
+interface ExecMessage {
+  role: string; name: string; title: string;
+  content: string; timestamp: string; gender?: string;
 }
 
-interface BoardroomState {
-  phase: 'idle' | 'listening' | 'processing' | 'running' | 'done';
-  step: number;
-  company: string;
-  industry: string;
-  challenge: string;
-  email: string;
-  results: AgentResult[];
-  currentAgent: string;
-  log: string[];
+interface Lead {
+  name: string; company: string; role: string;
+  email: string; linkedin: string; reason: string;
 }
 
-// ─── AGENT CONFIG ────────────────────────────────────────────
-const AGENTS = [
-  { key: 'ceo',      name: 'Arjun Mehta',    title: 'CEO',      color: '#FFD700', emoji: '👔' },
-  { key: 'cmo',      name: 'Priya Sharma',   title: 'CMO',      color: '#FF6B9D', emoji: '📢' },
-  { key: 'cfo',      name: 'Vikram Nair',    title: 'CFO',      color: '#00D4AA', emoji: '💰' },
-  { key: 'coo',      name: 'Ravi Krishnan',  title: 'COO',      color: '#4ECDC4', emoji: '⚙️' },
-  { key: 'cto',      name: 'Rahul Gupta',    title: 'CTO',      color: '#7B68EE', emoji: '💻' },
-  { key: 'hr',       name: 'Kavitha Reddy',  title: 'HR',       color: '#FF8C42', emoji: '👥' },
-  { key: 'vp-sales', name: 'Deepak Joshi',   title: 'VP Sales', color: '#32CD32', emoji: '🎯' },
+interface BoardResult {
+  discussion: ExecMessage[];
+  boardDecision: string;
+  actionItems: string[];
+  leads?: Lead[];
+  linkedinPost?: string;
+}
+
+interface AgentStatus {
+  gmail: 'idle' | 'running' | 'done' | 'error';
+  docs: 'idle' | 'running' | 'done' | 'error';
+  sheets: 'idle' | 'running' | 'done' | 'error';
+  calendar: 'idle' | 'running' | 'done' | 'error';
+  leads: 'idle' | 'running' | 'done' | 'error';
+  linkedin: 'idle' | 'running' | 'done' | 'error';
+}
+
+interface AgentLinks {
+  gmail?: string; docs?: string; sheets?: string; calendar?: string;
+}
+
+const EXECUTIVES = [
+  { key: 'ceo',     name: 'Arjun Mehta',   title: 'CHIEF EXECUTIVE OFFICER',  color: '#00D4FF', gender: 'male' },
+  { key: 'cmo',     name: 'Priya Sharma',  title: 'CHIEF MARKETING OFFICER',  color: '#0099FF', gender: 'female' },
+  { key: 'cfo',     name: 'Vikram Nair',   title: 'CHIEF FINANCIAL OFFICER',  color: '#0077EE', gender: 'male' },
+  { key: 'coo',     name: 'Ravi Krishnan', title: 'CHIEF OPERATIONS OFFICER', color: '#0088FF', gender: 'male' },
+  { key: 'cto',     name: 'Rahul Gupta',   title: 'CHIEF TECHNOLOGY OFFICER', color: '#00BBFF', gender: 'male' },
+  { key: 'vpsales', name: 'Deepak Joshi',  title: 'VP SALES',                 color: '#00AAEE', gender: 'male' },
+  { key: 'hr',      name: 'Kavitha Reddy', title: 'HEAD OF HUMAN RESOURCES',  color: '#0066DD', gender: 'female' },
 ];
 
-// ─── SPEECH UTILS ────────────────────────────────────────────
-function speak(text: string, onEnd?: () => void) {
-  if (typeof window === 'undefined') return;
-  window.speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text);
-  u.rate = 0.92;
-  u.pitch = 1.05;
-  u.volume = 1;
-  const voices = window.speechSynthesis.getVoices();
-  const preferred = voices.find(v => v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Daniel'));
-  if (preferred) u.voice = preferred;
-  if (onEnd) u.onend = onEnd;
-  window.speechSynthesis.speak(u);
-}
+const AGENT_INFO = [
+  { key: 'gmail',    label: 'GMAIL AGENT',    icon: '✉',  desc: 'BOARDROOM REPORT' },
+  { key: 'docs',     label: 'DOCS AGENT',     icon: '📄', desc: 'FULL TRANSCRIPT' },
+  { key: 'sheets',   label: 'SHEETS AGENT',   icon: '📊', desc: 'DASHBOARD' },
+  { key: 'calendar', label: 'CALENDAR AGENT', icon: '📅', desc: 'STRATEGY MEETING' },
+  { key: 'leads',    label: 'LEADS AGENT',    icon: '🎯', desc: '10 INDIAN LEADS' },
+  { key: 'linkedin', label: 'LINKEDIN AGENT', icon: '💼', desc: 'VIRAL POST' },
+] as const;
 
-// ─── HOLOGRAPHIC FACE ────────────────────────────────────────
-function HolographicFace({ phase, speaking }: { phase: string; speaking: boolean }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const animRef = useRef<number>(0);
-  const timeRef = useRef(0);
+const WAKE_LINES = [
+  'VISHWAKARMA AI ONLINE.',
+  'BOARDROOM OPERATING SYSTEM.',
+  'VERSION 1.0 INITIALIZED.',
+  '',
+  'Namaste. I am Vishwakarma.',
+  'Your AI Executive Assistant.',
+  '',
+  'I run complete boardrooms.',
+  'I execute real world tasks.',
+  'I manage your entire company.',
+  '',
+  'Speak your command.',
+];
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d')!;
-    const W = canvas.width = 340;
-    const H = canvas.height = 340;
-    const cx = W / 2, cy = H / 2;
-
-    function lerp(a: number, b: number, t: number) { return a + (b - a) * t; }
-
-    function draw(t: number) {
-      ctx.clearRect(0, 0, W, H);
-      const isSpeaking = speaking;
-      const isRunning = phase === 'running';
-      const pulse = Math.sin(t * 0.04) * 0.5 + 0.5;
-      const fastPulse = Math.sin(t * 0.12) * 0.5 + 0.5;
-      const microMove = Math.sin(t * 0.02) * 2;
-      const microMoveY = Math.cos(t * 0.015) * 1.5;
-
-      // ── Outer rings ──────────────────────────────────────
-      for (let i = 3; i >= 1; i--) {
-        const r = 140 + i * 18 + (isSpeaking ? fastPulse * 12 : pulse * 6);
-        const alpha = isSpeaking ? 0.15 + fastPulse * 0.2 : 0.08 + pulse * 0.06;
-        ctx.beginPath();
-        ctx.arc(cx, cy, r, 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(0,212,255,${alpha})`;
-        ctx.lineWidth = isSpeaking ? 2 : 1;
-        ctx.stroke();
-      }
-
-      // ── Rotating hex grid lines ───────────────────────────
-      ctx.save();
-      ctx.translate(cx, cy);
-      ctx.rotate(t * 0.003);
-      for (let a = 0; a < 6; a++) {
-        const angle = (a / 6) * Math.PI * 2;
-        ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.lineTo(Math.cos(angle) * 160, Math.sin(angle) * 160);
-        ctx.strokeStyle = `rgba(0,212,255,${0.04 + pulse * 0.04})`;
-        ctx.lineWidth = 1;
-        ctx.stroke();
-      }
-      ctx.restore();
-
-      // ── Neural particle dots ─────────────────────────────
-      for (let i = 0; i < (isSpeaking ? 24 : 14); i++) {
-        const angle = (i / (isSpeaking ? 24 : 14)) * Math.PI * 2 + t * 0.008;
-        const r = isSpeaking ? 118 + Math.sin(t * 0.1 + i) * 20 : 108 + Math.sin(t * 0.05 + i) * 8;
-        const px = cx + Math.cos(angle) * r;
-        const py = cy + Math.sin(angle) * r;
-        const brightness = 0.4 + Math.sin(t * 0.08 + i * 0.8) * 0.4;
-        ctx.beginPath();
-        ctx.arc(px, py, isSpeaking ? 3 : 2, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(0,212,255,${brightness})`;
-        ctx.fill();
-      }
-
-      // ── Face base ─────────────────────────────────────────
-      const faceGrad = ctx.createRadialGradient(cx + microMove, cy + microMoveY, 10, cx, cy, 110);
-      faceGrad.addColorStop(0, 'rgba(0,40,80,0.98)');
-      faceGrad.addColorStop(0.6, 'rgba(0,20,50,0.97)');
-      faceGrad.addColorStop(1, 'rgba(0,8,24,0.95)');
-      ctx.beginPath();
-      ctx.ellipse(cx + microMove, cy + microMoveY, 100, 118, 0, 0, Math.PI * 2);
-      ctx.fillStyle = faceGrad;
-      ctx.fill();
-      ctx.strokeStyle = `rgba(0,212,255,${0.5 + pulse * 0.3})`;
-      ctx.lineWidth = isSpeaking ? 2.5 : 1.5;
-      ctx.stroke();
-
-      // ── Scan line ─────────────────────────────────────────
-      const scanY = cy - 100 + ((t * (isSpeaking ? 3 : 1.5)) % 220);
-      const scanGrad = ctx.createLinearGradient(cx - 100, scanY, cx + 100, scanY);
-      scanGrad.addColorStop(0, 'transparent');
-      scanGrad.addColorStop(0.5, `rgba(0,212,255,${isSpeaking ? 0.5 : 0.2})`);
-      scanGrad.addColorStop(1, 'transparent');
-      ctx.beginPath();
-      ctx.moveTo(cx - 100, scanY);
-      ctx.lineTo(cx + 100, scanY);
-      ctx.strokeStyle = scanGrad;
-      ctx.lineWidth = isSpeaking ? 2 : 1;
-      ctx.stroke();
-
-      // ── Eyes ──────────────────────────────────────────────
-      const eyeY = cy - 22 + microMoveY;
-      const eyeScanX = Math.sin(t * 0.025) * 12;
-      const eyeScanY = Math.cos(t * 0.018) * 6;
-
-      [cx - 30, cx + 30].forEach((ex, idx) => {
-        // Eye glow
-        const eyeGlow = ctx.createRadialGradient(ex + microMove, eyeY, 1, ex + microMove, eyeY, 18);
-        eyeGlow.addColorStop(0, `rgba(0,212,255,${isSpeaking ? 0.5 + fastPulse * 0.4 : 0.2 + pulse * 0.2})`);
-        eyeGlow.addColorStop(1, 'transparent');
-        ctx.beginPath();
-        ctx.arc(ex + microMove, eyeY, 18, 0, Math.PI * 2);
-        ctx.fillStyle = eyeGlow;
-        ctx.fill();
-
-        // Eyelid shape
-        ctx.beginPath();
-        ctx.ellipse(ex + microMove, eyeY, 14, isSpeaking ? 11 : 9, 0, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(0,8,30,0.9)';
-        ctx.fill();
-        ctx.strokeStyle = `rgba(0,212,255,${0.8 + pulse * 0.2})`;
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-
-        // Pupil tracking
-        const pupilX = ex + microMove + eyeScanX * (idx === 0 ? 1 : 1);
-        const pupilY = eyeY + eyeScanY;
-        ctx.beginPath();
-        ctx.arc(pupilX, pupilY, 5, 0, Math.PI * 2);
-        ctx.fillStyle = isSpeaking ? `rgba(0,255,200,${0.7 + fastPulse * 0.3})` : 'rgba(0,212,255,0.9)';
-        ctx.fill();
-
-        // Specular reflection
-        ctx.beginPath();
-        ctx.arc(pupilX - 2, pupilY - 2, 1.5, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(255,255,255,0.9)';
-        ctx.fill();
-      });
-
-      // ── Eyebrows ──────────────────────────────────────────
-      const browRaise = isSpeaking ? Math.sin(t * 0.06) * 4 : 0;
-      [[cx - 30, cx - 14], [cx + 14, cx + 30]].forEach(([bx1, bx2], idx) => {
-        const by = cy - 44 + microMoveY - browRaise;
-        ctx.beginPath();
-        ctx.moveTo(bx1 + microMove, by + (idx === 0 ? 2 : -2));
-        ctx.lineTo(bx2 + microMove, by + (idx === 0 ? -2 : 2));
-        ctx.strokeStyle = `rgba(0,212,255,${0.6 + pulse * 0.3})`;
-        ctx.lineWidth = 2.5;
-        ctx.stroke();
-      });
-
-      // ── Nose bridge ───────────────────────────────────────
-      ctx.beginPath();
-      ctx.moveTo(cx + microMove, cy - 5 + microMoveY);
-      ctx.quadraticCurveTo(cx - 6 + microMove, cy + 8 + microMoveY, cx - 4 + microMove, cy + 14 + microMoveY);
-      ctx.moveTo(cx + microMove, cy - 5 + microMoveY);
-      ctx.quadraticCurveTo(cx + 6 + microMove, cy + 8 + microMoveY, cx + 4 + microMove, cy + 14 + microMoveY);
-      ctx.strokeStyle = `rgba(0,180,220,0.4)`;
-      ctx.lineWidth = 1;
-      ctx.stroke();
-
-      // ── Mouth ─────────────────────────────────────────────
-      const mouthY = cy + 44 + microMoveY;
-      const mouthOpen = isSpeaking ? 4 + Math.sin(t * 0.15) * 7 : 1;
-      const mouthWidth = 24;
-
-      // Mouth glow
-      if (isSpeaking) {
-        const mGlow = ctx.createRadialGradient(cx + microMove, mouthY, 1, cx + microMove, mouthY, 20);
-        mGlow.addColorStop(0, `rgba(0,255,200,${fastPulse * 0.4})`);
-        mGlow.addColorStop(1, 'transparent');
-        ctx.beginPath();
-        ctx.arc(cx + microMove, mouthY, 20, 0, Math.PI * 2);
-        ctx.fillStyle = mGlow;
-        ctx.fill();
-      }
-
-      // Upper lip
-      ctx.beginPath();
-      ctx.moveTo(cx - mouthWidth + microMove, mouthY);
-      ctx.quadraticCurveTo(cx + microMove, mouthY - 4, cx + mouthWidth + microMove, mouthY);
-      ctx.strokeStyle = `rgba(0,212,255,${0.8 + pulse * 0.2})`;
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-
-      // Lower lip
-      ctx.beginPath();
-      ctx.moveTo(cx - mouthWidth + microMove, mouthY);
-      ctx.quadraticCurveTo(cx + microMove, mouthY + mouthOpen * 2, cx + mouthWidth + microMove, mouthY);
-      ctx.strokeStyle = `rgba(0,212,255,0.8)`;
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-
-      // Mouth interior
-      if (mouthOpen > 2) {
-        ctx.beginPath();
-        ctx.ellipse(cx + microMove, mouthY + mouthOpen * 0.5, mouthWidth * 0.7, mouthOpen, 0, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(0,255,200,${mouthOpen / 20})`;
-        ctx.fill();
-      }
-
-      // ── Data lines on face ────────────────────────────────
-      if (isRunning || isSpeaking) {
-        for (let dl = 0; dl < 3; dl++) {
-          const dlY = cy - 60 + dl * 40 + microMoveY;
-          const dlAlpha = 0.1 + Math.sin(t * 0.05 + dl * 2) * 0.08;
-          ctx.beginPath();
-          ctx.moveTo(cx - 85 + microMove, dlY);
-          ctx.lineTo(cx + 85 + microMove, dlY);
-          ctx.strokeStyle = `rgba(0,212,255,${dlAlpha})`;
-          ctx.lineWidth = 0.5;
-          ctx.stroke();
-        }
-      }
-
-      // ── Cheekbone highlights ──────────────────────────────
-      [cx - 70, cx + 70].forEach(chX => {
-        const chGrad = ctx.createRadialGradient(chX + microMove, cy + 10 + microMoveY, 0, chX + microMove, cy + 10 + microMoveY, 22);
-        chGrad.addColorStop(0, `rgba(0,212,255,${0.12 + pulse * 0.06})`);
-        chGrad.addColorStop(1, 'transparent');
-        ctx.beginPath();
-        ctx.arc(chX + microMove, cy + 10 + microMoveY, 22, 0, Math.PI * 2);
-        ctx.fillStyle = chGrad;
-        ctx.fill();
-      });
-
-      // ── VISHWAKARMA text ──────────────────────────────────
-      ctx.font = '700 11px monospace';
-      ctx.fillStyle = `rgba(0,212,255,${0.4 + pulse * 0.2})`;
-      ctx.textAlign = 'center';
-      ctx.fillText('VISHWAKARMA AI', cx, cy + 84 + microMoveY);
-      ctx.font = '500 9px monospace';
-      ctx.fillStyle = `rgba(0,212,255,0.3)`;
-      ctx.fillText('BOARDROOM OS v4.0', cx, cy + 98 + microMoveY);
-    }
-
-    function loop() {
-      timeRef.current++;
-      draw(timeRef.current);
-      animRef.current = requestAnimationFrame(loop);
-    }
-    loop();
-    return () => cancelAnimationFrame(animRef.current);
-  }, [phase, speaking]);
-
-  return (
-    <div style={{ position: 'relative', width: 340, height: 340 }}>
-      <div style={{
-        position: 'absolute', inset: 0, borderRadius: '50%',
-        background: 'radial-gradient(ellipse at center, rgba(0,40,80,0.3) 0%, rgba(0,212,255,0.05) 70%, transparent 100%)',
-        filter: speaking ? 'blur(8px)' : 'blur(4px)',
-        transform: speaking ? 'scale(1.15)' : 'scale(1.05)',
-        transition: 'all 0.5s ease',
-      }} />
-      <canvas ref={canvasRef} style={{ position: 'relative', zIndex: 1 }} />
-    </div>
-  );
-}
-
-// ─── MAIN PAGE ────────────────────────────────────────────────
-export default function Home() {
-  const [state, setState] = useState<BoardroomState>({
-    phase: 'idle',
-    step: 0,
-    company: '',
-    industry: '',
-    challenge: '',
-    email: '',
-    results: [],
-    currentAgent: '',
-    log: [],
-  });
-  const [speaking, setSpeaking] = useState(false);
-  const [listening, setListening] = useState(false);
-  const [voiceStep, setVoiceStep] = useState(0);
-  const recognitionRef = useRef<any>(null);
-
-  // Speak with face animation
-  const sayAndAnimate = useCallback((text: string, onEnd?: () => void) => {
-    setSpeaking(true);
-    speak(text, () => {
-      setSpeaking(false);
-      if (onEnd) onEnd();
-    });
-  }, []);
-
-  // Start voice interaction
-  const startVoiceInteraction = useCallback(() => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      alert('Voice recognition not supported. Please use Chrome browser.');
-      return;
-    }
-
-    const recognition = new SpeechRecognition();
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.lang = 'en-IN';
-    recognitionRef.current = recognition;
-
-    const steps = [
-      { prompt: 'Namaste. I am Vishwakarma AI. Please tell me your company name.', field: 'company' },
-      { prompt: 'Got it. Now tell me your industry. For example: technology, retail, healthcare.', field: 'industry' },
-      { prompt: 'Understood. Now describe your biggest business challenge right now.', field: 'challenge' },
-      { prompt: 'Perfect. Finally, tell me your email address so I can send all reports.', field: 'email' },
-    ];
-
-    let currentStep = voiceStep;
-
-    const listenForInput = (stepIndex: number) => {
-      if (stepIndex >= steps.length) {
-        sayAndAnimate('Excellent. Your boardroom is assembling now. Seven AI executives are preparing your company strategy.', () => {
-          setState(prev => ({ ...prev, phase: 'running' }));
-        });
-        return;
-      }
-
-      const step = steps[stepIndex];
-      sayAndAnimate(step.prompt, () => {
-        setListening(true);
-        recognition.start();
-        recognition.onresult = (event: any) => {
-          const heard = event.results[0][0].transcript;
-          setListening(false);
-          setState(prev => ({ ...prev, [step.field]: heard }));
-
-          let confirm = '';
-          if (step.field === 'company') confirm = `Great. Your company is ${heard}.`;
-          else if (step.field === 'industry') confirm = `Perfect. Industry: ${heard}.`;
-          else if (step.field === 'challenge') confirm = `I understand. Challenge noted.`;
-          else if (step.field === 'email') confirm = `Got it. I will send all reports to ${heard}.`;
-
-          currentStep = stepIndex + 1;
-          setVoiceStep(currentStep);
-          sayAndAnimate(confirm, () => listenForInput(currentStep));
-        };
-        recognition.onerror = () => {
-          setListening(false);
-          sayAndAnimate('Sorry, I did not catch that. Please try again.', () => listenForInput(stepIndex));
-        };
-      });
-    };
-
-    setState(prev => ({ ...prev, phase: 'listening' }));
-    listenForInput(currentStep);
-  }, [voiceStep, sayAndAnimate]);
-
-  // Run all agents
-  useEffect(() => {
-    if (state.phase !== 'running') return;
-    if (!state.email || !state.company) return;
-
-    const runAgents = async () => {
-      const log: string[] = [];
-      const results: AgentResult[] = [];
-
-      for (const agent of AGENTS) {
-        setState(prev => ({ ...prev, currentAgent: agent.key, log: [...prev.log, `Running ${agent.title}...`] }));
-        sayAndAnimate(`${agent.name}, ${agent.title}, is now executing tasks for ${state.company}.`);
-
-        try {
-          const res = await fetch(`/api/${agent.key}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              email: state.email,
-              company: state.company,
-              industry: state.industry,
-              challenge: state.challenge,
-            }),
-          });
-          const data = await res.json();
-          results.push({ agent: agent.key, success: data.success, output: data.output, docLink: data.docLink, error: data.error });
-          log.push(`${agent.title}: ${data.success ? '✅ Done — ' + (data.docLink || '') : '❌ ' + data.error}`);
-          setState(prev => ({ ...prev, results: [...results], log: [...log] }));
-
-          // Wait for speech to finish before next agent
-          await new Promise(resolve => setTimeout(resolve, 3500));
-        } catch (err: any) {
-          results.push({ agent: agent.key, success: false, error: err.message });
-          log.push(`${agent.title}: ❌ ${err.message}`);
-          setState(prev => ({ ...prev, results: [...results], log: [...log] }));
-        }
-      }
-
-      // Fire boardroom debate + gmail + calendar with userEmail
-      try {
-        await fetch('/api/boardroom', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            companyName: state.company,
-            industry: state.industry,
-            command: state.challenge,
-            userEmail: state.email,
-          }),
-        });
-      } catch (err) {
-        console.error('Boardroom debate error:', err);
-      }
-
-      setState(prev => ({ ...prev, phase: 'done', currentAgent: '' }));
-      sayAndAnimate(
-        `Boardroom complete. All seven executives have executed their tasks for ${state.company}. Check your email for all reports.`
-      );
-    };
-
-    runAgents();
-  }, [state.phase]);
-
-  const resetAll = () => {
-    window.speechSynthesis.cancel();
-    setSpeaking(false);
-    setListening(false);
-    setVoiceStep(0);
-    setState({ phase: 'idle', step: 0, company: '', industry: '', challenge: '', email: '', results: [], currentAgent: '', log: [] });
-  };
-
-  // ─── RENDER ────────────────────────────────────────────────
-  return (
-    <div style={{
-      minHeight: '100vh',
-      background: 'radial-gradient(ellipse at 50% 0%, #001830 0%, #000810 60%, #000000 100%)',
-      color: '#e0f0ff',
-      fontFamily: "'Courier New', monospace",
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      padding: '32px 16px',
-    }}>
-
-      {/* Header */}
-      <div style={{ textAlign: 'center', marginBottom: 24 }}>
-        <div style={{ fontSize: 11, letterSpacing: 6, color: '#00d4ff', opacity: 0.6, marginBottom: 8 }}>
-          WORLD'S FIRST
-        </div>
-        <h1 style={{
-          fontSize: 'clamp(20px, 4vw, 32px)',
-          fontWeight: 900,
-          letterSpacing: 3,
-          background: 'linear-gradient(135deg, #00d4ff 0%, #ffffff 50%, #00d4ff 100%)',
-          WebkitBackgroundClip: 'text',
-          WebkitTextFillColor: 'transparent',
-          margin: 0,
-        }}>
-          VISHWAKARMA AI BOARDROOM OS
-        </h1>
-        <div style={{ fontSize: 11, letterSpacing: 4, color: '#00d4ff', opacity: 0.5, marginTop: 6 }}>
-          MULTI-AGENT AUTONOMOUS COMPANY OPERATING SYSTEM
-        </div>
-      </div>
-
-      {/* Digital Human */}
-      <div style={{ marginBottom: 28, position: 'relative' }}>
-        <HolographicFace phase={state.phase} speaking={speaking} />
-        {listening && (
-          <div style={{
-            position: 'absolute', bottom: -20, left: '50%', transform: 'translateX(-50%)',
-            background: 'rgba(255,60,60,0.2)', border: '1px solid rgba(255,60,60,0.6)',
-            borderRadius: 20, padding: '4px 16px', fontSize: 11, color: '#ff6060',
-            animation: 'pulse 1s infinite',
-          }}>
-            🎤 LISTENING...
-          </div>
-        )}
-        {speaking && (
-          <div style={{
-            position: 'absolute', bottom: -20, left: '50%', transform: 'translateX(-50%)',
-            background: 'rgba(0,212,255,0.1)', border: '1px solid rgba(0,212,255,0.4)',
-            borderRadius: 20, padding: '4px 16px', fontSize: 11, color: '#00d4ff',
-          }}>
-            ◉ SPEAKING
-          </div>
-        )}
-      </div>
-
-      {/* IDLE — Start Options */}
-      {state.phase === 'idle' && (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, width: '100%', maxWidth: 480 }}>
-          <button
-            onClick={startVoiceInteraction}
-            style={{
-              width: '100%', padding: '18px 24px',
-              background: 'linear-gradient(135deg, rgba(0,212,255,0.15), rgba(0,100,180,0.2))',
-              border: '1px solid rgba(0,212,255,0.5)', borderRadius: 12,
-              color: '#00d4ff', fontSize: 15, fontWeight: 700, letterSpacing: 2,
-              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
-              fontFamily: 'inherit',
-            }}
-          >
-            🎤 SPEAK TO VISHWAKARMA AI
-          </button>
-
-          <div style={{ color: '#00d4ff', opacity: 0.4, fontSize: 11, letterSpacing: 3 }}>— OR TYPE BELOW —</div>
-
-          <input placeholder="Company name" value={state.company}
-            onChange={e => setState(p => ({ ...p, company: e.target.value }))}
-            style={inputStyle} />
-          <input placeholder="Industry (e.g. Technology, Retail)" value={state.industry}
-            onChange={e => setState(p => ({ ...p, industry: e.target.value }))}
-            style={inputStyle} />
-          <textarea placeholder="Your biggest business challenge right now..." value={state.challenge}
-            onChange={e => setState(p => ({ ...p, challenge: e.target.value }))}
-            style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }} />
-          <input placeholder="Your email address" value={state.email} type="email"
-            onChange={e => setState(p => ({ ...p, email: e.target.value }))}
-            style={inputStyle} />
-
-          <button
-            onClick={() => {
-              if (!state.company || !state.email || !state.challenge) {
-                alert('Please fill company name, challenge, and email.');
-                return;
-              }
-              setState(p => ({ ...p, phase: 'running' }));
-            }}
-            style={{
-              width: '100%', padding: '18px 24px',
-              background: 'linear-gradient(135deg, rgba(255,215,0,0.15), rgba(200,150,0,0.2))',
-              border: '1px solid rgba(255,215,0,0.5)', borderRadius: 12,
-              color: '#FFD700', fontSize: 15, fontWeight: 700, letterSpacing: 2,
-              cursor: 'pointer', fontFamily: 'inherit',
-            }}
-          >
-            🔱 INITIATE BOARDROOM
-          </button>
-        </div>
-      )}
-
-      {/* LISTENING / PROCESSING */}
-      {(state.phase === 'listening') && (
-        <div style={{ textAlign: 'center', color: '#00d4ff', fontSize: 14, letterSpacing: 2 }}>
-          {state.company && <div>Company: <strong>{state.company}</strong></div>}
-          {state.industry && <div>Industry: <strong>{state.industry}</strong></div>}
-          {state.challenge && <div>Challenge: <strong>{state.challenge.substring(0, 60)}...</strong></div>}
-        </div>
-      )}
-
-      {/* RUNNING */}
-      {state.phase === 'running' && (
-        <div style={{ width: '100%', maxWidth: 560 }}>
-          <div style={{ textAlign: 'center', marginBottom: 20 }}>
-            <div style={{ fontSize: 13, color: '#FFD700', letterSpacing: 3, marginBottom: 4 }}>
-              ⚡ BOARDROOM EXECUTING
-            </div>
-            <div style={{ fontSize: 11, color: '#00d4ff', opacity: 0.6 }}>
-              {state.company} · {state.industry}
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {AGENTS.map(agent => {
-              const result = state.results.find(r => r.agent === agent.key);
-              const isActive = state.currentAgent === agent.key;
-              return (
-                <div key={agent.key} style={{
-                  display: 'flex', alignItems: 'center', gap: 12,
-                  padding: '12px 16px', borderRadius: 10,
-                  background: isActive
-                    ? `rgba(${hexToRgb(agent.color)},0.15)`
-                    : result?.success ? 'rgba(0,255,100,0.05)' : 'rgba(255,255,255,0.03)',
-                  border: `1px solid ${isActive ? agent.color : result?.success ? 'rgba(0,255,100,0.3)' : 'rgba(255,255,255,0.08)'}`,
-                  transition: 'all 0.4s ease',
-                }}>
-                  <span style={{ fontSize: 20 }}>{agent.emoji}</span>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: isActive ? agent.color : '#e0f0ff' }}>
-                      {agent.name} · {agent.title}
-                    </div>
-                    <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', marginTop: 2 }}>
-                      {isActive ? '⚡ Executing...' : result ? (result.success ? '✅ Complete' : '❌ Failed') : 'Waiting...'}
-                    </div>
-                  </div>
-                  {result?.docLink && (
-                    <a href={result.docLink} target="_blank" rel="noreferrer"
-                      style={{ fontSize: 10, color: '#00d4ff', textDecoration: 'underline' }}>
-                      View Doc
-                    </a>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* DONE */}
-      {state.phase === 'done' && (
-        <div style={{ width: '100%', maxWidth: 560 }}>
-          <div style={{ textAlign: 'center', marginBottom: 24 }}>
-            <div style={{ fontSize: 22, color: '#FFD700', letterSpacing: 3, marginBottom: 6 }}>
-              🔱 BOARDROOM COMPLETE
-            </div>
-            <div style={{ fontSize: 12, color: '#00d4ff', opacity: 0.7 }}>
-              {state.company} is now running autonomously · Check {state.email}
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 24 }}>
-            {state.results.map(r => {
-              const agent = AGENTS.find(a => a.key === r.agent)!;
-              return (
-                <div key={r.agent} style={{
-                  display: 'flex', alignItems: 'center', gap: 12,
-                  padding: '10px 16px', borderRadius: 8,
-                  background: r.success ? 'rgba(0,255,100,0.05)' : 'rgba(255,60,60,0.05)',
-                  border: `1px solid ${r.success ? 'rgba(0,255,100,0.25)' : 'rgba(255,60,60,0.25)'}`,
-                }}>
-                  <span>{agent?.emoji}</span>
-                  <div style={{ flex: 1, fontSize: 12 }}>
-                    {agent?.name} · {agent?.title}
-                    {r.success ? ' — ✅ Emails sent + Doc saved' : ` — ❌ ${r.error}`}
-                  </div>
-                  {r.docLink && (
-                    <a href={r.docLink} target="_blank" rel="noreferrer"
-                      style={{ fontSize: 10, color: '#00d4ff', textDecoration: 'underline', whiteSpace: 'nowrap' }}>
-                      Open Doc →
-                    </a>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          <button onClick={resetAll} style={{
-            width: '100%', padding: '14px', background: 'rgba(0,212,255,0.1)',
-            border: '1px solid rgba(0,212,255,0.4)', borderRadius: 10,
-            color: '#00d4ff', fontSize: 13, fontWeight: 700, letterSpacing: 2,
-            cursor: 'pointer', fontFamily: 'inherit',
-          }}>
-            ↺ RUN AGAIN FOR ANOTHER COMPANY
-          </button>
-        </div>
-      )}
-
-      {/* Footer */}
-      <div style={{ marginTop: 40, textAlign: 'center', opacity: 0.3, fontSize: 10, letterSpacing: 2 }}>
-        INVENTED BY ANUBHAB ROY · AGARTALA, TRIPURA, INDIA · AGE 28 · ZERO CODING BACKGROUND<br />
-        BUILDING FROM HOME · NO TEAM · NO OFFICE · NO INVESTORS · CHANGING THE WORLD 🔱🇮🇳
-      </div>
-
-      <style>{`
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
-        input:focus, textarea:focus { outline: none; border-color: rgba(0,212,255,0.7) !important; }
-        * { box-sizing: border-box; }
-      `}</style>
-    </div>
-  );
-}
-
-// ─── HELPERS ──────────────────────────────────────────────────
-const inputStyle: React.CSSProperties = {
-  width: '100%', padding: '12px 16px',
-  background: 'rgba(0,212,255,0.05)',
-  border: '1px solid rgba(0,212,255,0.25)',
-  borderRadius: 8, color: '#e0f0ff', fontSize: 13,
-  fontFamily: "'Courier New', monospace",
+const VOICE_PROFILES: Record<string, { gender: string; rate: number; pitch: number }> = {
+  ceo:     { gender: 'male',   rate: 0.90, pitch: 0.82 },
+  cmo:     { gender: 'female', rate: 0.93, pitch: 1.18 },
+  cfo:     { gender: 'male',   rate: 0.78, pitch: 0.72 },
+  coo:     { gender: 'male',   rate: 0.85, pitch: 0.95 },
+  cto:     { gender: 'male',   rate: 0.98, pitch: 1.05 },
+  vpsales: { gender: 'male',   rate: 1.02, pitch: 1.08 },
+  hr:      { gender: 'female', rate: 0.82, pitch: 1.22 },
 };
 
-function hexToRgb(hex: string) {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return `${r},${g},${b}`;
+// BUG 3 FIX — strip any leading number like "1." or "1)" from action items
+const cleanActionItem = (item: string): string => {
+  return item.replace(/^\d+[\.\)]\s*/, '').replace(/\*+/g, '').trim();
+};
+
+// BUG 4 FIX — strip all asterisks and markdown from any text
+const cleanText = (text: string): string => {
+  return text.replace(/\*+/g, '').replace(/#+\s/g, '').replace(/__/g, '').trim();
+};
+
+const speakChunked = (text: string, rate = 0.88, pitch = 1.0, gender = 'male') => {
+  if (typeof window === 'undefined') return;
+  window.speechSynthesis.cancel();
+  const raw = text.replace(/\n+/g, ' ').trim();
+  const sentences = raw.match(/[^.!?]+[.!?]+/g) || [raw];
+  const chunks: string[] = [];
+  let cur = '';
+  for (const s of sentences) {
+    if ((cur + s).length > 120) { if (cur) chunks.push(cur.trim()); cur = s; }
+    else cur += s;
+  }
+  if (cur.trim()) chunks.push(cur.trim());
+  if (!chunks.length) chunks.push(raw.slice(0, 150));
+  const voices = window.speechSynthesis.getVoices();
+  const fVoice = voices.find(v => v.name.includes('Zira') || v.name.includes('Samantha') || v.name.includes('Karen') || v.name.toLowerCase().includes('female'));
+  const mVoice = voices.find(v => v.name.includes('David') || v.name.includes('Daniel') || v.name.includes('Mark') || v.name.toLowerCase().includes('male'));
+  let i = 0;
+  const next = () => {
+    if (i >= chunks.length) return;
+    const u = new SpeechSynthesisUtterance(chunks[i]);
+    u.rate = rate; u.pitch = pitch; u.volume = 1;
+    if (gender === 'female' && fVoice) u.voice = fVoice;
+    else if (gender === 'male' && mVoice) u.voice = mVoice;
+    else if (voices.length > 0) u.voice = gender === 'female' ? (voices[1] || voices[0]) : voices[0];
+    u.onend = () => { i++; setTimeout(next, 80); };
+    u.onerror = () => { i++; setTimeout(next, 80); };
+    window.speechSynthesis.speak(u);
+  };
+  setTimeout(next, 100);
+};
+
+// BUG 2 FIX — calculate real speech duration from word count
+const getSpeechDuration = (text: string, rate: number = 0.88): number => {
+  const wordCount = text.trim().split(/\s+/).length;
+  const wordsPerMinute = 150 * rate;
+  const durationMs = (wordCount / wordsPerMinute) * 60 * 1000;
+  return durationMs + 2000; // 2 second buffer
+};
+
+type Particle = { x: number; y: number; tx: number; ty: number; life: number; size: number; alpha: number; speed: number; };
+
+function HolographicFace({ speaking }: { speaking: boolean }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const rafRef = useRef<number>(0);
+  const tRef = useRef<number>(0);
+  const parts = useRef<Particle[]>([]);
+  const blinkT = useRef<number>(0);
+  const blinking = useRef<boolean>(false);
+  const scanY = useRef<number>(0);
+
+  const draw = useCallback((ctx: CanvasRenderingContext2D, W: number, H: number, t: number) => {
+    ctx.clearRect(0, 0, W, H);
+    const cx = W / 2, cy = H / 2 - 10, fw = W * 0.38, fh = H * 0.52;
+    ctx.save(); ctx.globalAlpha = 0.055; ctx.strokeStyle = '#00D4FF'; ctx.lineWidth = 0.5;
+    const hs = 26;
+    for (let r = -1; r < H / hs + 1; r++) for (let c = -1; c < W / (hs * 1.732) + 1; c++) {
+      const hx = c * hs * 1.732 + (r % 2 === 0 ? 0 : hs * 0.866), hy = r * hs * 0.75;
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) { const a = (Math.PI / 3) * i - Math.PI / 6; i === 0 ? ctx.moveTo(hx + hs * 0.5 * Math.cos(a), hy + hs * 0.5 * Math.sin(a)) : ctx.lineTo(hx + hs * 0.5 * Math.cos(a), hy + hs * 0.5 * Math.sin(a)); }
+      ctx.closePath(); ctx.stroke();
+    }
+    ctx.restore();
+    const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, fh);
+    grd.addColorStop(0, 'rgba(0,140,255,0.22)'); grd.addColorStop(0.6, 'rgba(0,80,200,0.07)'); grd.addColorStop(1, 'transparent');
+    ctx.save(); ctx.fillStyle = grd; ctx.beginPath(); ctx.ellipse(cx, cy, fw * 1.4, fh * 1.25, 0, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+    ctx.save();
+    const ps = parts.current;
+    if (ps.length < 200) { const a = Math.random() * Math.PI * 2, r = Math.random() * fw * 1.15; ps.push({ x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r * (fh / fw), tx: cx + Math.cos(a) * fw * 0.36 * Math.random(), ty: cy + Math.sin(a) * fh * 0.43 * Math.random(), life: Math.random() * 0.1, size: Math.random() * 1.9 + 0.4, alpha: 0, speed: Math.random() * 0.013 + 0.004 }); }
+    for (let i = ps.length - 1; i >= 0; i--) {
+      const p = ps[i]; p.life += p.speed;
+      if (p.life < 0.3) { p.alpha = p.life / 0.3; p.x += (p.tx - p.x) * 0.07; p.y += (p.ty - p.y) * 0.07; }
+      else if (p.life < 0.85) { p.alpha = 1; p.x += (Math.random() - 0.5) * 0.35; p.y += (Math.random() - 0.5) * 0.35; }
+      else if (p.life < 1) { p.alpha = (1 - p.life) / 0.15; }
+      else { ps.splice(i, 1); continue; }
+      ctx.globalAlpha = p.alpha * 0.72 * (speaking ? 1 + 0.35 * Math.sin(t * 9 + i * 0.3) : 1);
+      ctx.fillStyle = '#00D4FF'; ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+    const la = 0.58 + 0.1 * Math.sin(t * 1.4);
+    ctx.save(); ctx.strokeStyle = '#00D4FF'; ctx.shadowColor = '#00D4FF'; ctx.shadowBlur = 7; ctx.lineWidth = 1;
+    ctx.globalAlpha = la;
+    ctx.beginPath(); ctx.ellipse(cx, cy, fw, fh, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(cx, cy - fh * 0.28, fw * 0.68, fh * 0.26, 0, Math.PI, Math.PI * 2); ctx.stroke();
+    ctx.globalAlpha = la * 0.6;
+    [[-1], [1]].forEach(([s]) => { ctx.beginPath(); ctx.moveTo(cx + s! * fw * 0.83, cy - fh * 0.04); ctx.bezierCurveTo(cx + s! * fw * 0.64, cy + fh * 0.11, cx + s! * fw * 0.44, cy + fh * 0.22, cx + s! * fw * 0.19, cy + fh * 0.36); ctx.stroke(); });
+    ctx.globalAlpha = la * 0.72;
+    ctx.beginPath(); ctx.moveTo(cx - fw * 0.5, cy + fh * 0.29); ctx.bezierCurveTo(cx - fw * 0.34, cy + fh * 0.49, cx - fw * 0.14, cy + fh * 0.57, cx, cy + fh * 0.59); ctx.bezierCurveTo(cx + fw * 0.14, cy + fh * 0.57, cx + fw * 0.34, cy + fh * 0.49, cx + fw * 0.5, cy + fh * 0.29); ctx.stroke();
+    ctx.globalAlpha = la * 0.22; ctx.beginPath(); ctx.moveTo(cx, cy - fh * 0.56); ctx.lineTo(cx, cy + fh * 0.56); ctx.stroke();
+    [-0.17, 0.09, 0.31].forEach(yf => { ctx.globalAlpha = la * 0.18; const hw = fw * (1 - Math.abs(yf) * 0.5) * 0.88; ctx.beginPath(); ctx.moveTo(cx - hw, cy + fh * yf); ctx.lineTo(cx + hw, cy + fh * yf); ctx.stroke(); });
+    ctx.globalAlpha = la * 0.72;
+    [[-1], [1]].forEach(([s]) => { ctx.beginPath(); ctx.moveTo(cx, cy - fh * 0.07); ctx.bezierCurveTo(cx + s! * fw * 0.07, cy + fh * 0.07, cx + s! * fw * 0.1, cy + fh * 0.15, cx + s! * fw * 0.12, cy + fh * 0.19); ctx.stroke(); });
+    ctx.beginPath(); ctx.arc(cx, cy + fh * 0.2, fw * 0.1, 0, Math.PI); ctx.stroke();
+    blinkT.current += 0.016;
+    if (blinkT.current > 4.4) { blinking.current = true; if (blinkT.current > 4.65) { blinking.current = false; blinkT.current = 0; } }
+    const bs = blinking.current ? 0.07 : 1;
+    const ey = cy - fh * 0.11, eox = fw * 0.28, erx = fw * 0.165, ery = fh * 0.072;
+    [-1, 1].forEach(s => {
+      const ex = cx + s * eox;
+      ctx.globalAlpha = la; ctx.beginPath(); ctx.ellipse(ex, ey, erx, ery * bs, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(ex, ey, erx * 0.44 * bs, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = '#001828'; ctx.globalAlpha = la; ctx.beginPath(); ctx.arc(ex, ey, erx * 0.17 * bs, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 0.9 * (speaking ? 1 + 0.55 * Math.sin(t * 7) : 1);
+      const pg = ctx.createRadialGradient(ex, ey, 0, ex, ey, erx * 0.4);
+      pg.addColorStop(0, 'rgba(0,230,255,0.95)'); pg.addColorStop(0.5, 'rgba(0,160,255,0.5)'); pg.addColorStop(1, 'rgba(0,80,180,0)');
+      ctx.fillStyle = pg; ctx.beginPath(); ctx.arc(ex, ey, erx * 0.4 * bs, 0, Math.PI * 2); ctx.fill();
+    });
+    const my = cy + fh * 0.32, mw = fw * 0.31;
+    const open = speaking ? (0.07 + 0.07 * Math.abs(Math.sin(t * 7.5))) * fh : 0.014 * fh + 0.008 * fh * Math.sin(t * 1.1);
+    ctx.globalAlpha = la; ctx.strokeStyle = '#00D4FF';
+    ctx.beginPath(); ctx.moveTo(cx - mw, my); ctx.bezierCurveTo(cx - mw * 0.5, my - fh * 0.024, cx, my - fh * 0.03, cx + mw * 0.5, my - fh * 0.024); ctx.bezierCurveTo(cx + mw * 0.7, my - fh * 0.014, cx + mw, my, cx + mw, my); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx - mw, my); ctx.bezierCurveTo(cx - mw * 0.5, my + open, cx, my + open * 1.35, cx + mw * 0.5, my + open); ctx.bezierCurveTo(cx + mw * 0.7, my + open * 0.5, cx + mw, my, cx + mw, my); ctx.stroke();
+    ctx.globalAlpha = la * 0.8;
+    [-1, 1].forEach(s => { const bx = cx + s * eox, bby = ey - ery * 1.95; ctx.beginPath(); ctx.moveTo(bx - fw * 0.16, bby + fh * 0.012); ctx.bezierCurveTo(bx - fw * 0.04, bby - fh * 0.019, bx + fw * 0.04, bby - fh * 0.019, bx + fw * 0.16, bby + fh * 0.012); ctx.stroke(); });
+    scanY.current = (scanY.current + 0.007) % 1;
+    const sy = (cy - fh) + scanY.current * fh * 2;
+    const sg = ctx.createLinearGradient(0, sy - 28, 0, sy + 28);
+    sg.addColorStop(0, 'rgba(0,212,255,0)'); sg.addColorStop(0.5, 'rgba(0,212,255,0.11)'); sg.addColorStop(1, 'rgba(0,212,255,0)');
+    ctx.globalAlpha = 1; ctx.fillStyle = sg; ctx.fillRect(cx - fw, sy - 28, fw * 2, 56);
+    ctx.globalAlpha = 0.72; ctx.strokeStyle = '#00FFFF'; ctx.lineWidth = 1.5; ctx.shadowBlur = 9;
+    const bp = 10, bsz = 19;
+    [[cx-fw-bp,cy-fh-bp,1,1],[cx+fw+bp,cy-fh-bp,-1,1],[cx-fw-bp,cy+fh+bp,1,-1],[cx+fw+bp,cy+fh+bp,-1,-1]].forEach(([x,y,dx,dy])=>{ ctx.beginPath(); ctx.moveTo(x+dx*bsz,y); ctx.lineTo(x,y); ctx.lineTo(x,y+dy*bsz); ctx.stroke(); });
+    ctx.restore();
+  }, [speaking]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current; if (!canvas) return;
+    const ctx = canvas.getContext('2d'); if (!ctx) return;
+    const loop = () => { tRef.current += 0.016; draw(ctx, canvas.width, canvas.height, tRef.current); rafRef.current = requestAnimationFrame(loop); };
+    rafRef.current = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [draw]);
+
+  return <canvas ref={canvasRef} width={320} height={380} className="mx-auto block" />;
 }
+
+function ExecCard({ exec, msg, active }: { exec: typeof EXECUTIVES[0]; msg?: ExecMessage; active: boolean }) {
+  return (
+    <div className="rounded-lg border overflow-hidden transition-all duration-500" style={{ borderColor: active ? exec.color : '#001a3a', background: 'rgba(0,12,38,0.92)', boxShadow: active ? `0 0 30px ${exec.color}55` : '0 0 6px #00112222' }}>
+      <div className="px-4 py-3 flex items-center gap-3" style={{ background: active ? `linear-gradient(90deg,${exec.color}1a,transparent)` : 'transparent', borderBottom: `1px solid ${active ? exec.color : '#001a3a'}` }}>
+        <div className="w-9 h-9 rounded-full flex items-center justify-center font-mono font-bold text-xs flex-shrink-0" style={{ border: `1px solid ${exec.color}`, color: exec.color, background: `${exec.color}18`, boxShadow: active ? `0 0 14px ${exec.color}88` : 'none' }}>
+          {exec.name.split(' ').map(n => n[0]).join('')}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="font-mono font-bold truncate" style={{ color: exec.color, fontFamily: 'Orbitron, sans-serif', fontSize: 11 }}>{exec.name}</div>
+          <div className="font-mono opacity-50 truncate" style={{ color: '#88bbff', fontSize: 9, letterSpacing: 1 }}>{exec.title}</div>
+        </div>
+        {active && <div className="flex items-center gap-1.5 flex-shrink-0"><div className="w-2 h-2 rounded-full animate-pulse" style={{ background: exec.color }} /><span style={{ color: exec.color, fontSize: 9, fontFamily: 'monospace', letterSpacing: 2 }}>SPEAKING</span></div>}
+      </div>
+      {msg && (
+        <div className="px-4 py-3">
+          <p className="font-mono leading-relaxed" style={{ color: active ? '#cceeff' : '#88aadd', fontSize: 11, maxHeight: 130, overflow: 'hidden' }}>
+            {cleanText(msg.content.length > 400 ? msg.content.slice(0, 400) + '…' : msg.content)}
+          </p>
+          {msg.timestamp && <div className="mt-1.5 font-mono" style={{ color: '#334466', fontSize: 9 }}>{msg.timestamp}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AgentPanel({ label, icon, desc, status, link }: { label: string; icon: string; desc: string; status: 'idle'|'running'|'done'|'error'; link?: string }) {
+  const c = { idle: '#003366', running: '#00AAFF', done: '#00FFAA', error: '#FF5555' }[status];
+  const t = { idle: 'STANDBY', running: 'EXECUTING...', done: '✓ COMPLETE', error: 'ERROR' }[status];
+  return (
+    <div className="relative rounded-lg border p-3 overflow-hidden transition-all duration-500" style={{ borderColor: c, background: 'rgba(0,15,45,0.9)', boxShadow: `0 0 ${status === 'running' ? 22 : 10}px ${c}44` }}>
+      {status === 'running' && <div className="absolute inset-0 rounded-lg" style={{ background: `linear-gradient(90deg,transparent,${c}18,transparent)`, animation: 'sweep 1.4s linear infinite' }} />}
+      <div className="relative z-10">
+        <div className="text-xl mb-1">{icon}</div>
+        <div className="font-mono font-bold tracking-widest mb-0.5" style={{ color: c, fontFamily: 'Orbitron, sans-serif', fontSize: 8 }}>{label}</div>
+        <div className="font-mono opacity-50 mb-1" style={{ color: '#4466aa', fontSize: 8 }}>{desc}</div>
+        <div className="font-mono font-bold" style={{ color: c, fontSize: 10 }}>{t}</div>
+        {link && status === 'done' && <a href={link} target="_blank" rel="noreferrer" className="mt-1 inline-block font-mono underline" style={{ color: '#00FFAA', fontSize: 9 }}>→ VIEW</a>}
+      </div>
+    </div>
+  );
+}
+
+export default function VishwakarmaAI() {
+  const [phase, setPhase] = useState<Phase>('landing');
+  const [wakeText, setWakeText] = useState('');
+  const [companyName, setCompanyName] = useState('');
+  const [industry, setIndustry] = useState('');
+  const [command, setCommand] = useState('');
+  const [email, setEmail] = useState('');
+  const [activationStep, setActivationStep] = useState(0);
+  const [activeExec, setActiveExec] = useState(-1);
+  const [boardResult, setBoardResult] = useState<BoardResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [agentStatus, setAgentStatus] = useState<AgentStatus>({ gmail: 'idle', docs: 'idle', sheets: 'idle', calendar: 'idle', leads: 'idle', linkedin: 'idle' });
+  const [agentLinks, setAgentLinks] = useState<AgentLinks>({});
+  const [missionText, setMissionText] = useState('');
+  const [missionDone, setMissionDone] = useState(false);
+  const [currentSpeaker, setCurrentSpeaker] = useState('');
+  const [readingDecision, setReadingDecision] = useState(false);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [linkedinPost, setLinkedinPost] = useState('');
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.speechSynthesis.getVoices();
+      window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+    }
+  }, []);
+
+  // BUG 6 FIX — zero delay on voice when awakening starts
+  useEffect(() => {
+    if (phase !== 'awakening') return;
+    let li = 0, ci = 0;
+
+    // BUG 6 FIX: voice starts immediately at 0ms delay instead of 1400ms
+    speakChunked('Namaste. I am Vishwakarma. Your AI Executive Assistant. Seven AI executives will debate your command and execute real world tasks. Speak your command.', 0.82, 0.72, 'male');
+
+    const tick = () => {
+      if (li >= WAKE_LINES.length) { setTimeout(() => setPhase('command'), 700); return; }
+      const line = WAKE_LINES[li];
+      if (ci <= line.length) {
+        setWakeText(WAKE_LINES.slice(0, li).join('\n') + (li > 0 ? '\n' : '') + line.slice(0, ci));
+        ci++; setTimeout(tick, line === '' ? 0 : 36);
+      } else { li++; ci = 0; setTimeout(tick, line === '' ? 70 : 170); }
+    };
+    const t = setTimeout(() => { tick(); }, 800);
+    return () => clearTimeout(t);
+  }, [phase]);
+
+  // BUG 5 FIX — auto read board decision the moment decision phase starts
+  useEffect(() => {
+    if (phase === 'decision' && boardResult) {
+      setTimeout(() => {
+        readDecisionAloud();
+      }, 600);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
+
+  const runActivation = async () => {
+    setPhase('activating');
+    speakChunked('Activating Neural Boardroom. Loading all seven executive agents.', 0.85, 0.75, 'male');
+    for (let i = 0; i <= EXECUTIVES.length; i++) {
+      await delay(400); setActivationStep(i);
+      if (i < EXECUTIVES.length) {
+        await delay(150);
+        speakChunked(`${EXECUTIVES[i].name}. Online.`, 0.9, EXECUTIVES[i].gender === 'female' ? 1.2 : 0.88, EXECUTIVES[i].gender);
+        await delay(400);
+      }
+    }
+    await delay(300);
+    runBoardroom();
+  };
+
+  const runBoardroom = async () => {
+    setPhase('boardroom'); setLoading(true);
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 300000);
+      const res = await fetch('/api/boardroom', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ companyName, industry, command }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      const data: BoardResult = await res.json();
+      setBoardResult(data);
+      if (data.leads && data.leads.length > 0) setLeads(data.leads);
+      if (data.linkedinPost) setLinkedinPost(data.linkedinPost);
+
+      for (let i = 0; i < data.discussion.length; i++) {
+        setActiveExec(i);
+        setCurrentSpeaker(data.discussion[i].name);
+        const exec = data.discussion[i];
+        const profile = VOICE_PROFILES[exec.role] || { gender: 'male', rate: 0.88, pitch: 1 };
+        speakChunked(`${exec.name} speaking.`, 0.9, 0.82, 'male');
+        await delay(900);
+        speakChunked(exec.content.slice(0, 500), profile.rate, profile.pitch, profile.gender);
+
+        // BUG 2 FIX — use real word count to calculate how long speech takes
+        const speechDuration = getSpeechDuration(exec.content.slice(0, 500), profile.rate);
+        await delay(speechDuration);
+      }
+      setActiveExec(-1); setCurrentSpeaker('');
+      window.speechSynthesis.cancel();
+      await delay(400);
+      setPhase('decision');
+    } catch (e) { console.error(e); }
+    finally { setLoading(false); }
+  };
+
+  const readDecisionAloud = () => {
+    if (!boardResult) return;
+    setReadingDecision(true);
+    const cleanDecision = cleanText(boardResult.boardDecision);
+    const cleanItems = boardResult.actionItems.map(cleanActionItem).join('. ');
+    const text = `The board has reached a unanimous decision. ${cleanDecision}. The action items are: ${cleanItems}`;
+    speakChunked(text, 0.80, 0.72, 'male');
+    const duration = getSpeechDuration(text, 0.80);
+    setTimeout(() => setReadingDecision(false), duration);
+  };
+
+  const runAgents = async () => {
+    setPhase('executing'); if (!boardResult) return;
+    setMissionText('INITIATING AGENT EXECUTION SEQUENCE...');
+    speakChunked('Initiating all six agents. Gmail. Docs. Sheets. Calendar. Leads. LinkedIn.', 0.85, 0.72, 'male');
+
+    // Gmail
+    setAgentStatus(p => ({ ...p, gmail: 'running' }));
+    try {
+      const r = await fetch('/api/gmail', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ companyName, command, email, boardResult }) });
+      if (r.ok) { setAgentStatus(p => ({ ...p, gmail: 'done' })); speakChunked('Gmail complete.', 0.9, 0.8, 'male'); }
+      else setAgentStatus(p => ({ ...p, gmail: 'error' }));
+    } catch { setAgentStatus(p => ({ ...p, gmail: 'error' })); }
+    await delay(400);
+
+    // Docs
+    setAgentStatus(p => ({ ...p, docs: 'running' }));
+    try {
+      const r = await fetch('/api/docs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ companyName, command, email, boardResult }) });
+      const d = await r.json();
+      if (r.ok) { setAgentStatus(p => ({ ...p, docs: 'done' })); if (d.link) setAgentLinks(p => ({ ...p, docs: d.link })); speakChunked('Google Doc created.', 0.9, 0.8, 'male'); }
+      else setAgentStatus(p => ({ ...p, docs: 'error' }));
+    } catch { setAgentStatus(p => ({ ...p, docs: 'error' })); }
+    await delay(400);
+
+    // Sheets
+    setAgentStatus(p => ({ ...p, sheets: 'running' }));
+    try {
+      const r = await fetch('/api/sheets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ companyName, command, email, boardResult }) });
+      const d = await r.json();
+      if (r.ok) { setAgentStatus(p => ({ ...p, sheets: 'done' })); if (d.link) setAgentLinks(p => ({ ...p, sheets: d.link })); speakChunked('Google Sheets updated.', 0.9, 0.8, 'male'); }
+      else setAgentStatus(p => ({ ...p, sheets: 'error' }));
+    } catch { setAgentStatus(p => ({ ...p, sheets: 'error' })); }
+    await delay(400);
+
+    // Calendar
+    setAgentStatus(p => ({ ...p, calendar: 'running' }));
+    try {
+      const r = await fetch('/api/calendar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ companyName, command, email, boardResult }) });
+      const d = await r.json();
+      if (r.ok && d.success !== false) { setAgentStatus(p => ({ ...p, calendar: 'done' })); if (d.link) setAgentLinks(p => ({ ...p, calendar: d.link })); speakChunked('Calendar meeting booked.', 0.9, 0.8, 'male'); }
+      else setAgentStatus(p => ({ ...p, calendar: 'error' }));
+    } catch { setAgentStatus(p => ({ ...p, calendar: 'error' })); }
+    await delay(400);
+
+    // Leads
+    setAgentStatus(p => ({ ...p, leads: 'running' }));
+    try {
+      if (leads.length > 0) {
+        setAgentStatus(p => ({ ...p, leads: 'done' }));
+        speakChunked('Ten leads generated.', 0.9, 0.8, 'male');
+      } else {
+        const r = await fetch('/api/leads', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ industry, company: companyName }) });
+        const d = await r.json();
+        if (r.ok && d.leads) { setLeads(d.leads); setAgentStatus(p => ({ ...p, leads: 'done' })); speakChunked('Ten leads generated.', 0.9, 0.8, 'male'); }
+        else setAgentStatus(p => ({ ...p, leads: 'error' }));
+      }
+    } catch { setAgentStatus(p => ({ ...p, leads: 'error' })); }
+    await delay(400);
+
+    // LinkedIn
+    setAgentStatus(p => ({ ...p, linkedin: 'running' }));
+    try {
+      if (linkedinPost) {
+        setAgentStatus(p => ({ ...p, linkedin: 'done' }));
+        speakChunked('LinkedIn post ready.', 0.9, 0.8, 'male');
+      } else {
+        const r = await fetch('/api/linkedin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ companyName, boardDecision: boardResult.boardDecision }) });
+        const d = await r.json();
+        if (r.ok && d.post) { setLinkedinPost(d.post); setAgentStatus(p => ({ ...p, linkedin: 'done' })); speakChunked('LinkedIn post ready.', 0.9, 0.8, 'male'); }
+        else setAgentStatus(p => ({ ...p, linkedin: 'error' }));
+      }
+    } catch { setAgentStatus(p => ({ ...p, linkedin: 'error' })); }
+    await delay(600);
+
+    setPhase('complete'); setMissionDone(true);
+    setMissionText('MISSION ACCOMPLISHED.\nALL 6 AGENTS EXECUTED.\nYOUR COMPANY IS RUNNING.');
+    setTimeout(() => speakChunked('Mission accomplished. All six agents have executed. Your company is now running on Vishwakarma AI.', 0.80, 0.70, 'male'), 700);
+  };
+
+  const speaking = phase === 'awakening' || phase === 'activating' || missionDone || activeExec >= 0 || readingDecision;
+
+  const resetAll = () => {
+    setPhase('landing'); setBoardResult(null);
+    setAgentStatus({ gmail: 'idle', docs: 'idle', sheets: 'idle', calendar: 'idle', leads: 'idle', linkedin: 'idle' });
+    setAgentLinks({}); setMissionDone(false); setMissionText(''); setCurrentSpeaker('');
+    setLeads([]); setLinkedinPost(''); setCopied(false);
+    window.speechSynthesis.cancel();
+  };
+
+  return (
+    <>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
+        *{box-sizing:border-box;margin:0;padding:0;}
+        body,html{background:#000008;color:#00D4FF;font-family:'Share Tech Mono',monospace;min-height:100vh;}
+        ::-webkit-scrollbar{width:3px;}::-webkit-scrollbar-track{background:#000018;}::-webkit-scrollbar-thumb{background:#00D4FF33;border-radius:2px;}
+        @keyframes sweep{0%{transform:translateX(-100%);}100%{transform:translateX(200%);}}
+        @keyframes hglow{0%,100%{text-shadow:0 0 18px #00D4FF,0 0 36px #00D4FF88;}50%{text-shadow:0 0 28px #00FFFF,0 0 55px #00FFFF99;}}
+        @keyframes dpulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:0.35;transform:scale(0.65);}}
+        @keyframes fadeUp{from{opacity:0;transform:translateY(18px);}to{opacity:1;transform:translateY(0);}}
+        @keyframes float{0%,100%{transform:translateY(0);}50%{transform:translateY(-10px);}}
+        .fu{animation:fadeUp 0.55s ease forwards;}
+        .orb{font-family:'Orbitron',sans-serif;}
+        .panel{background:rgba(0,18,55,0.88);border:1px solid #00D4FF22;border-radius:8px;box-shadow:0 0 14px #00D4FF18;}
+        .sdot{animation:dpulse 1.9s ease-in-out infinite;}
+        .inp{background:rgba(0,18,55,0.7);border:1px solid #00D4FF33;color:#00D4FF;font-family:'Share Tech Mono',monospace;border-radius:4px;padding:10px 14px;width:100%;outline:none;transition:border-color .2s,box-shadow .2s;font-size:13px;}
+        .inp:focus{border-color:#00D4FF;box-shadow:0 0 12px #00D4FF44;}
+        .inp::placeholder{color:#00446655;}
+        .btn{background:transparent;border:1px solid #00D4FF;color:#00D4FF;font-family:'Orbitron',sans-serif;font-size:12px;letter-spacing:2px;padding:11px 24px;border-radius:4px;cursor:pointer;transition:all .25s;text-transform:uppercase;}
+        .btn:hover{background:#00D4FF;color:#000018;box-shadow:0 0 24px #00D4FFaa;}
+        .btn-big{background:linear-gradient(135deg,#002d80,#0044bb);border:1px solid #00D4FF;color:#00D4FF;font-family:'Orbitron',sans-serif;font-size:13px;letter-spacing:3px;padding:15px 36px;border-radius:4px;cursor:pointer;box-shadow:0 0 26px #00D4FF55,inset 0 0 18px #0055FF22;transition:all .3s;text-transform:uppercase;width:100%;}
+        .btn-big:hover{box-shadow:0 0 40px #00D4FFaa;transform:translateY(-1px);}
+        .btn-big:disabled{opacity:0.35;cursor:not-allowed;transform:none;}
+        .btn-voice{background:transparent;border:1px solid #00FFAA;color:#00FFAA;font-family:'Orbitron',sans-serif;font-size:11px;letter-spacing:2px;padding:8px 18px;border-radius:4px;cursor:pointer;transition:all .25s;margin-bottom:16px;}
+        .btn-voice:hover{background:#00FFAA22;}
+        .btn-enter{background:linear-gradient(135deg,#001a55,#003399);border:2px solid #00D4FF;color:#00D4FF;font-family:'Orbitron',sans-serif;font-size:16px;letter-spacing:4px;padding:20px 60px;border-radius:6px;cursor:pointer;box-shadow:0 0 40px #00D4FF66,inset 0 0 30px #0044FF22;transition:all .3s;text-transform:uppercase;animation:float 3s ease-in-out infinite;}
+        .btn-enter:hover{box-shadow:0 0 60px #00D4FFaa;transform:translateY(-3px) scale(1.02);}
+        .btn-copy{background:transparent;border:1px solid #0099FF;color:#0099FF;font-family:'Orbitron',sans-serif;font-size:10px;letter-spacing:2px;padding:6px 14px;border-radius:4px;cursor:pointer;transition:all .25s;}
+        .btn-copy:hover{background:#0099FF22;}
+        table{width:100%;border-collapse:collapse;}
+        th{background:#001a44;color:#00D4FF;font-family:'Orbitron',sans-serif;font-size:9px;letter-spacing:2px;padding:8px 10px;text-align:left;border-bottom:1px solid #00D4FF33;}
+        td{color:#88aacc;font-family:'Share Tech Mono',monospace;font-size:10px;padding:7px 10px;border-bottom:1px solid #001a3a;}
+        tr:hover td{background:rgba(0,80,160,0.15);}
+      `}</style>
+
+      <div style={{ minHeight: '100vh', background: '#000008', position: 'relative' }}>
+        <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', background: 'radial-gradient(ellipse at 50% 30%, rgba(0,60,160,0.07) 0%, transparent 65%)', zIndex: 0 }} />
+
+        {/* HEADER */}
+        <header style={{ position: 'relative', zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 24px', borderBottom: '1px solid #00D4FF18', background: 'rgba(0,4,18,0.97)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <svg width="42" height="42" viewBox="0 0 42 42"><defs><linearGradient id="vg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor="#00D4FF"/><stop offset="100%" stopColor="#0055FF"/></linearGradient></defs><rect width="42" height="42" rx="8" fill="url(#vg)" opacity="0.15"/><rect width="42" height="42" rx="8" fill="none" stroke="#00D4FF" strokeWidth="1.5"/><text x="21" y="30" textAnchor="middle" fontSize="26" fontWeight="900" fontFamily="Arial" fill="url(#vg)" style={{filter:'drop-shadow(0 0 6px #00D4FF)'}}>V</text></svg>
+            <div>
+              <div className="orb" style={{ color: '#00D4FF', fontSize: 15, fontWeight: 900, letterSpacing: 3, animation: 'hglow 3s ease-in-out infinite' }}>VISHWAKARMA AI</div>
+              <div style={{ color: '#0055AA', fontSize: 9, letterSpacing: 2, fontFamily: 'monospace' }}>WORLD'S FIRST MULTI-AGENT AI BOARDROOM OS</div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+            {currentSpeaker && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#00D4FF18', border: '1px solid #00D4FF44', borderRadius: 4, padding: '4px 12px' }}>
+                <div className="sdot" style={{ width: 6, height: 6, borderRadius: '50%', background: '#00FFAA', boxShadow: '0 0 6px #00FFAA' }} />
+                <span style={{ color: '#00FFAA', fontSize: 10, fontFamily: 'monospace', letterSpacing: 1 }}>🎤 {currentSpeaker}</span>
+              </div>
+            )}
+            {[['NEURAL NETWORK', 'ONLINE'], ['6 AGENTS', 'READY']].map(([l, v]) => (
+              <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div className="sdot" style={{ width: 7, height: 7, borderRadius: '50%', background: '#00D4FF', boxShadow: '0 0 5px #00D4FF' }} />
+                <span style={{ fontSize: 9, color: '#004477', fontFamily: 'monospace', letterSpacing: 1 }}>{l}: <span style={{ color: '#00D4FF' }}>{v}</span></span>
+              </div>
+            ))}
+          </div>
+        </header>
+
+        <main style={{ position: 'relative', zIndex: 10, maxWidth: 1280, margin: '0 auto', padding: '32px 20px' }}>
+
+          {/* LANDING */}
+          {phase === 'landing' && (
+            <div className="fu" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 32, textAlign: 'center', paddingTop: 20 }}>
+              <div style={{ display: 'inline-block', background: '#00D4FF22', border: '1px solid #00D4FF', borderRadius: 4, padding: '6px 16px' }}>
+                <span className="orb" style={{ color: '#00D4FF', fontSize: 10, letterSpacing: 4 }}>🔱 INVENTED IN INDIA — AGARTALA, TRIPURA</span>
+              </div>
+              <div>
+                <div className="orb" style={{ color: '#00D4FF', fontSize: 13, letterSpacing: 4, marginBottom: 12, animation: 'hglow 3s infinite' }}>WORLD'S FIRST</div>
+                <div className="orb" style={{ color: '#FFFFFF', fontSize: 28, fontWeight: 900, letterSpacing: 2, lineHeight: 1.3, textShadow: '0 0 30px #00D4FF' }}>MULTI-AGENT AI<br />BOARDROOM OS</div>
+              </div>
+              <div style={{ maxWidth: 600, fontFamily: 'monospace', fontSize: 13, lineHeight: 2, color: '#6699BB' }}>
+                7 autonomous AI executives debate your business command.<br />
+                They fight. They argue. They reach unanimous decisions.<br />
+                Then 6 agents execute real tasks in the real world.
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 10, maxWidth: 700, width: '100%' }}>
+                {[
+                  { icon: '🧠', label: '7 EXECUTIVES' },
+                  { icon: '⚔️', label: 'REAL DEBATES' },
+                  { icon: '✉', label: 'GMAIL' },
+                  { icon: '🎯', label: '10 LEADS' },
+                  { icon: '💼', label: 'LINKEDIN' },
+                  { icon: '🎤', label: 'VOICE AI' },
+                ].map(f => (
+                  <div key={f.label} className="panel" style={{ padding: '12px 8px', textAlign: 'center' }}>
+                    <div style={{ fontSize: 20, marginBottom: 4 }}>{f.icon}</div>
+                    <div className="orb" style={{ color: '#00D4FF', fontSize: 8, letterSpacing: 1.5 }}>{f.label}</div>
+                  </div>
+                ))}
+              </div>
+              <button className="btn-enter" onClick={() => setPhase('awakening')}>⚡ ENTER BOARDROOM</button>
+              <div style={{ color: '#002244', fontSize: 10, fontFamily: 'monospace' }}>INVENTED BY ANUBHAB ROY — VISHWAKARMAAI.COM</div>
+            </div>
+          )}
+
+          {/* AWAKENING */}
+          {phase === 'awakening' && (
+            <div className="fu" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 28 }}>
+              <HolographicFace speaking={true} />
+              <div className="panel" style={{ padding: '32px 40px', maxWidth: 420, width: '100%', textAlign: 'center', minHeight: 200 }}>
+                <pre style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: 13, lineHeight: 2, color: '#00D4FF', whiteSpace: 'pre-wrap' }}>
+                  {wakeText}<span style={{ display: 'inline-block', width: 8, height: 16, background: '#00FFFF', marginLeft: 3, verticalAlign: 'middle', animation: 'dpulse 0.8s infinite' }} />
+                </pre>
+              </div>
+            </div>
+          )}
+
+          {/* COMMAND */}
+          {phase === 'command' && (
+            <div className="fu" style={{ display: 'flex', gap: 28, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, width: 320, flexShrink: 0 }}>
+                <HolographicFace speaking={false} />
+                <div className="panel" style={{ padding: '14px 20px', width: '100%', textAlign: 'center' }}>
+                  <div className="orb" style={{ color: '#004488', fontSize: 9, letterSpacing: 3 }}>VISHWAKARMA</div>
+                  <div className="orb" style={{ color: '#00D4FF', fontSize: 12, fontWeight: 700, marginTop: 4, letterSpacing: 2 }}>AWAITING COMMAND</div>
+                  <div className="sdot" style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: '#00D4FF', boxShadow: '0 0 7px #00D4FF', marginTop: 8 }} />
+                </div>
+              </div>
+              <div style={{ flex: 1, minWidth: 300 }}>
+                <div className="panel" style={{ padding: 24, marginBottom: 14 }}>
+                  <div className="orb" style={{ color: '#00D4FF', fontSize: 10, letterSpacing: 3, borderBottom: '1px solid #00D4FF18', paddingBottom: 12, marginBottom: 20 }}>◈ INITIATE BOARDROOM SEQUENCE</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+                    <div>
+                      <div style={{ color: '#005588', fontSize: 9, letterSpacing: 2, marginBottom: 7, fontFamily: 'monospace' }}>COMPANY NAME</div>
+                      <input className="inp" placeholder="Your company name..." value={companyName} onChange={e => setCompanyName(e.target.value)} />
+                    </div>
+                    <div>
+                      <div style={{ color: '#005588', fontSize: 9, letterSpacing: 2, marginBottom: 7, fontFamily: 'monospace' }}>INDUSTRY</div>
+                      <input className="inp" placeholder="e.g. SaaS, Fintech..." value={industry} onChange={e => setIndustry(e.target.value)} />
+                    </div>
+                  </div>
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ color: '#005588', fontSize: 9, letterSpacing: 2, marginBottom: 7, fontFamily: 'monospace' }}>YOUR EMAIL</div>
+                    <input className="inp" type="email" placeholder="your@email.com" value={email} onChange={e => setEmail(e.target.value)} />
+                  </div>
+                  <div style={{ marginBottom: 22 }}>
+                    <div style={{ color: '#005588', fontSize: 9, letterSpacing: 2, marginBottom: 7, fontFamily: 'monospace' }}>BOARDROOM COMMAND</div>
+                    <textarea className="inp" rows={4} style={{ resize: 'vertical' }} placeholder="e.g. We want to launch our B2B SaaS to 500 Indian companies in 90 days. Build the complete strategy." value={command} onChange={e => setCommand(e.target.value)} />
+                  </div>
+                  <button className="btn-big" onClick={runActivation} disabled={!companyName || !command}>⚡ INITIATE BOARDROOM SEQUENCE</button>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+                  {['7 AI EXECUTIVES', '6 LIVE AGENTS', 'VOICE + LEADS'].map(t => (
+                    <div key={t} className="panel" style={{ padding: '10px 8px', textAlign: 'center' }}>
+                      <div style={{ color: '#00D4FF66', fontSize: 9, letterSpacing: 1.5, fontFamily: 'monospace' }}>{t}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ACTIVATING */}
+          {phase === 'activating' && (
+            <div className="fu" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 24 }}>
+              <HolographicFace speaking={true} />
+              <div className="panel" style={{ padding: 28, maxWidth: 500, width: '100%' }}>
+                <div className="orb" style={{ color: '#00D4FF', fontSize: 10, letterSpacing: 3, textAlign: 'center', marginBottom: 20 }}>ACTIVATING NEURAL BOARDROOM...</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {EXECUTIVES.map((e, i) => (
+                    <div key={e.key} style={{ display: 'flex', alignItems: 'center', gap: 10, fontFamily: 'monospace', fontSize: 12, color: i < activationStep ? e.color : '#002244', opacity: i < activationStep ? 1 : 0.3, transition: 'all 0.4s' }}>
+                      <div style={{ width: 7, height: 7, borderRadius: '50%', background: i < activationStep ? e.color : '#002244', boxShadow: i < activationStep ? `0 0 7px ${e.color}` : 'none', flexShrink: 0 }} />
+                      {e.name.toUpperCase()} — {e.title}
+                      {i < activationStep && <span style={{ marginLeft: 'auto', fontSize: 9, letterSpacing: 2 }}>🎤 ONLINE</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* BOARDROOM + DECISION */}
+          {(phase === 'boardroom' || phase === 'decision') && (
+            <div className="fu">
+              <div className="panel" style={{ padding: '14px 20px', marginBottom: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div>
+                  <div style={{ color: '#004466', fontSize: 9, letterSpacing: 2, fontFamily: 'monospace' }}>LIVE BOARDROOM — WORLD'S FIRST MULTI-AGENT AI</div>
+                  <div className="orb" style={{ color: '#00D4FF', fontSize: 13, fontWeight: 700, marginTop: 3 }}>{companyName} — {command.slice(0, 55)}{command.length > 55 ? '…' : ''}</div>
+                </div>
+                {loading && <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}><div style={{ width: 7, height: 7, borderRadius: '50%', background: '#00D4FF', animation: 'dpulse 1s infinite' }} /><span style={{ color: '#00D4FF', fontSize: 10, fontFamily: 'monospace', letterSpacing: 2 }}>AI DEBATING...</span></div>}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))', gap: 14, marginBottom: 24 }}>
+                {EXECUTIVES.map((e, i) => <ExecCard key={e.key} exec={e} msg={boardResult?.discussion[i]} active={activeExec === i} />)}
+              </div>
+
+              {phase === 'decision' && boardResult && (
+                <div className="fu panel" style={{ padding: 28, border: '1px solid #00D4FF', boxShadow: '0 0 40px #00D4FF44' }}>
+                  <div className="orb" style={{ color: '#00D4FF', fontSize: 13, fontWeight: 900, letterSpacing: 2, marginBottom: 16 }}>◈ BOARD HAS REACHED UNANIMOUS DECISION</div>
+                  {/* BUG 5 FIX — auto voice triggers via useEffect, manual button still available */}
+                  <button className="btn-voice" onClick={readDecisionAloud}>{readingDecision ? '🔊 READING...' : '🔊 READ AGAIN'}</button>
+                  {/* BUG 4 FIX — cleanText removes all asterisks */}
+                  <div style={{ fontFamily: 'monospace', fontSize: 13, lineHeight: 1.9, color: '#99ccee', marginBottom: 20, whiteSpace: 'pre-wrap' }}>{cleanText(boardResult.boardDecision)}</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 24 }}>
+                    {/* BUG 3 FIX — cleanActionItem strips leading numbers like "1." so display shows 1 2 3 not 11 22 33 */}
+                    {boardResult.actionItems.map((item, i) => (
+                      <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                        <span className="orb" style={{ background: '#00D4FF22', color: '#00D4FF', border: '1px solid #00D4FF44', borderRadius: 4, width: 26, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, flexShrink: 0 }}>{i + 1}</span>
+                        <span style={{ fontFamily: 'monospace', fontSize: 12, color: '#AADDFF', lineHeight: 1.8 }}>{cleanActionItem(item)}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <button className="btn-big" onClick={runAgents}>🚀 EXECUTE ALL 6 AGENTS — DELIVER TO WORLD</button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* EXECUTING */}
+          {phase === 'executing' && (
+            <div className="fu">
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20, marginBottom: 32 }}>
+                <HolographicFace speaking={true} />
+                <div className="panel" style={{ padding: '24px 36px', textAlign: 'center', maxWidth: 440 }}>
+                  <pre className="orb" style={{ color: '#00D4FF', fontSize: 14, fontWeight: 700, letterSpacing: 2, lineHeight: 2, whiteSpace: 'pre-wrap' }}>{missionText}<span style={{ display: 'inline-block', width: 8, height: 16, background: '#00FFFF', marginLeft: 3, verticalAlign: 'middle', animation: 'dpulse 0.8s infinite' }} /></pre>
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(160px,1fr))', gap: 12 }}>
+                {AGENT_INFO.map(a => <AgentPanel key={a.key} label={a.label} icon={a.icon} desc={a.desc} status={agentStatus[a.key as keyof AgentStatus]} link={agentLinks[a.key as keyof AgentLinks]} />)}
+              </div>
+            </div>
+          )}
+
+          {/* COMPLETE */}
+          {phase === 'complete' && (
+            <div className="fu" style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
+                <HolographicFace speaking={true} />
+                <div className="panel" style={{ padding: '28px 36px', maxWidth: 500, width: '100%', textAlign: 'center', border: '1px solid #00D4FF', boxShadow: '0 0 55px #00D4FF55' }}>
+                  <pre className="orb" style={{ color: '#00D4FF', fontSize: 16, fontWeight: 900, letterSpacing: 3, lineHeight: 1.9, whiteSpace: 'pre-wrap', textShadow: '0 0 20px #00D4FF', marginBottom: 20 }}>{missionText}</pre>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16 }}>
+                    {AGENT_INFO.map(a => (
+                      <div key={a.key} className="panel" style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span>{a.icon}</span>
+                        <span style={{ color: agentStatus[a.key as keyof AgentStatus] === 'done' ? '#00FFAA' : '#FF5555', fontSize: 9, fontFamily: 'monospace' }}>
+                          {agentStatus[a.key as keyof AgentStatus] === 'done' ? '✓' : '✗'} {a.label.replace(' AGENT', '')}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <button className="btn" onClick={resetAll}>↩ NEW SESSION</button>
+                </div>
+              </div>
+
+              {leads.length > 0 && (
+                <div className="panel" style={{ padding: 24 }}>
+                  <div className="orb" style={{ color: '#00D4FF', fontSize: 11, letterSpacing: 3, marginBottom: 16 }}>🎯 AI GENERATED LEADS — {leads.length} PROSPECTS</div>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table>
+                      <thead>
+                        <tr><th>NAME</th><th>COMPANY</th><th>ROLE</th><th>EMAIL</th><th>REASON</th><th>LINKEDIN</th></tr>
+                      </thead>
+                      <tbody>
+                        {leads.map((lead, i) => (
+                          <tr key={i}>
+                            <td style={{ color: '#00D4FF' }}>{lead.name}</td>
+                            <td>{lead.company}</td>
+                            <td>{lead.role}</td>
+                            <td>{lead.email}</td>
+                            <td style={{ maxWidth: 200 }}>{lead.reason}</td>
+                            <td><a href={lead.linkedin} target="_blank" rel="noreferrer" style={{ color: '#0099FF' }}>→ CONNECT</a></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {linkedinPost && (
+                <div className="panel" style={{ padding: 24 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                    <div className="orb" style={{ color: '#0099FF', fontSize: 11, letterSpacing: 3 }}>💼 LINKEDIN POST — READY TO PUBLISH</div>
+                    <button className="btn-copy" onClick={() => { navigator.clipboard.writeText(linkedinPost); setCopied(true); setTimeout(() => setCopied(false), 2000); }}>
+                      {copied ? '✓ COPIED!' : '📋 COPY POST'}
+                    </button>
+                  </div>
+                  <div style={{ fontFamily: 'monospace', fontSize: 12, lineHeight: 1.9, color: '#88aacc', whiteSpace: 'pre-wrap', background: 'rgba(0,30,80,0.5)', padding: 16, borderRadius: 6, border: '1px solid #0033aa' }}>
+                    {linkedinPost}
+                  </div>
+                  <div style={{ marginTop: 12, fontFamily: 'monospace', fontSize: 10, color: '#334466' }}>
+                    Copy this post and paste it directly on LinkedIn.
+                  </div>
+                </div>
+              )}
+
+              <div style={{ color: '#002244', fontSize: 10, fontFamily: 'monospace', textAlign: 'center' }}>
+                WORLD'S FIRST MULTI-AGENT AI BOARDROOM OS — VISHWAKARMAAI.COM<br />
+                INVENTED BY ANUBHAB ROY — AGARTALA, TRIPURA, INDIA 🇮🇳
+              </div>
+            </div>
+          )}
+
+        </main>
+      </div>
+    </>
+  );
+}
+
+const delay = (ms: number) => new Promise(r => setTimeout(r, ms));
