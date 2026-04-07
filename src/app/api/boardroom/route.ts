@@ -1,7 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
-import Anthropic from '@anthropic-ai/sdk';
 
-const ai = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY!;
+const MODEL = 'anthropic/claude-sonnet';
+
+async function callAI(system: string, userMessage: string, max_tokens = 1200): Promise<string> {
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      max_tokens,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: userMessage }
+      ],
+    }),
+  });
+  const data = await response.json();
+  return data.choices[0].message.content;
+}
 
 export const maxDuration = 300;
 
@@ -47,24 +67,16 @@ async function getExecResponse(
     ? prev.map(m => `${m.name} (${m.title}): "${m.content.slice(0, 600)}"`).join('\n\n---\n\n')
     : 'You are speaking first.';
 
-  const r = await ai.messages.create({
-    model: 'claude-sonnet-4-5',
-    max_tokens: 1200,
-    system: exec.system,
-    messages: [{
-      role: 'user',
-      content: `Company: ${company}
+  const userMessage = `Company: ${company}
 Industry: ${industry || 'General Business'}
 Board Command: ${cmd}
 
 ${prev.length > 0
-        ? `Previous speakers:\n\n${context}\n\nNow speak as ${exec.name}. React emotionally. Reference them by name. Minimum 250 words. Plain English only. Zero asterisks. Zero markdown.`
-        : `Speak first as ${exec.name}. Be bold and specific. Minimum 250 words. Plain English only. Zero asterisks. Zero markdown.`
-      }`
-    }],
-  });
+      ? `Previous speakers:\n\n${context}\n\nNow speak as ${exec.name}. React emotionally. Reference them by name. Minimum 250 words. Plain English only. Zero asterisks. Zero markdown.`
+      : `Speak first as ${exec.name}. Be bold and specific. Minimum 250 words. Plain English only. Zero asterisks. Zero markdown.`
+    }`;
 
-  return (r.content[0] as { text: string }).text;
+  return await callAI(exec.system, userMessage, 1200);
 }
 
 export async function POST(req: NextRequest) {
@@ -86,55 +98,40 @@ export async function POST(req: NextRequest) {
       prev.push({ name: exec.name, title: exec.title, content });
     }
 
-    const decisionRes = await ai.messages.create({
-      model: 'claude-sonnet-4-5',
-      max_tokens: 800,
-      system: `You are the board secretary. Plain English only. Zero asterisks. Zero markdown. Zero bold. Zero stars. Zero symbols. Raw text only. Write exactly 3 powerful sentences of UNANIMOUS BOARD DECISION. Then write exactly 5 numbered action items in this format: 1. [Task] — Owner: [Name] — Deadline: [Week X] — Budget: [X lakhs]`,
-      messages: [{
-        role: 'user',
-        content: `Company: ${companyName}
+    const decisionSystem = `You are the board secretary. Plain English only. Zero asterisks. Zero markdown. Zero bold. Zero stars. Zero symbols. Raw text only. Write exactly 3 powerful sentences of UNANIMOUS BOARD DECISION. Then write exactly 5 numbered action items in this format: 1. [Task] - Owner: [Name] - Deadline: [Week X] - Budget: [X lakhs]`;
+
+    const decisionPrompt = `Company: ${companyName}
 Command: ${command}
 Board debate: ${prev.map(m => `${m.name}: ${m.content.slice(0, 300)}`).join('\n\n')}
-Write UNANIMOUS BOARD DECISION then 5 action items. Plain text only. No asterisks. No markdown. No bold.`
-      }],
-    });
+Write UNANIMOUS BOARD DECISION then 5 action items. Plain text only. No asterisks. No markdown. No bold.`;
 
-    const fullText = (decisionRes.content[0] as { text: string }).text;
+    const fullText = await callAI(decisionSystem, decisionPrompt, 800);
+
     const lines = fullText.split('\n').filter(l => l.trim());
     const actionItems: string[] = [];
     const decisionLines: string[] = [];
     lines.forEach(l => /^[1-5][\.\)]/.test(l.trim()) ? actionItems.push(l.trim()) : decisionLines.push(l));
-
     const boardDecision = decisionLines.join('\n').trim();
 
-    const [leadsRes, linkedinRes] = await Promise.all([
-      ai.messages.create({
-        model: 'claude-sonnet-4-5',
-        max_tokens: 800,
-        messages: [{
-          role: 'user',
-          content: `Generate 10 realistic Indian business leads for ${companyName} in ${industry}. Return ONLY a valid JSON array. No markdown. No asterisks. No extra text before or after. Each item must have: name, company, role, email, linkedin, reason.`
-        }],
-      }),
-      ai.messages.create({
-        model: 'claude-sonnet-4-5',
-        max_tokens: 400,
-        messages: [{
-          role: 'user',
-          content: `Write a viral LinkedIn post for ${companyName} based on: "${boardDecision.slice(0, 200)}". Hook, 3 to 4 lines, CTA, 5 hashtags. Max 150 words. India startup context. Plain English only. No asterisks. No bold. No markdown symbols.`
-        }],
-      }),
+    const [leadsText, linkedinPost] = await Promise.all([
+      callAI(
+        'You are a lead generation expert.',
+        `Generate 10 realistic Indian business leads for ${companyName} in ${industry}. Return ONLY a valid JSON array. No markdown. No asterisks. No extra text. Each item must have: name, company, role, email, linkedin, reason.`,
+        800
+      ),
+      callAI(
+        'You are a LinkedIn content expert.',
+        `Write a viral LinkedIn post for ${companyName} based on: "${boardDecision.slice(0, 200)}". Hook, 3 to 4 lines, CTA, 5 hashtags. Max 150 words. India startup context. Plain English only. No asterisks. No bold. No markdown symbols.`,
+        400
+      ),
     ]);
 
     let leads: object[] = [];
     try {
-      const leadsText = (leadsRes.content[0] as { text: string }).text;
       const clean = leadsText.replace(/```json|```/g, '').trim();
       const match = clean.match(/\[[\s\S]*\]/);
       if (match) leads = JSON.parse(match[0]);
     } catch { leads = []; }
-
-    const linkedinPost = (linkedinRes.content[0] as { text: string }).text;
 
     return NextResponse.json({
       discussion,
